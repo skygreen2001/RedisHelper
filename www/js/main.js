@@ -187,6 +187,7 @@ var app = new Vue({
                              localStorage.serves = JSON.stringify(ctrl.serves);
                              ctrl.$Spin.hide();
                          } else {
+                             ctrl.$Spin.hide();
                              ctrl.$Modal.error({
                                 title: '服务端错误',
                                 content: '请确认服务端是否配置正确！'

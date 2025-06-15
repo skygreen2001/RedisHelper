@@ -12,45 +12,7 @@
 
 ## 下载源码
 
-下载地址: https://github.com/skygreen2001/RedisManager
-
-* **Git安装**
-
-  - 下载Git
-    - Git SCM  : https://git-scm.com/downloads
-    - Bitbucket: https://www.atlassian.com/git/tutorials/install-git
-    - Git大全   : https://gitee.com/all-about-git
-
-  - 下载RedisManager
-
-      ```
-      > git clone https://github.com/skygreen2001/RedisManager.git
-      或
-      > git clone https://github.com.cnpmjs.org/skygreen2001/RedisManager
-      或
-      > git clone https://gitee.com/skygreen2015/RedisManager
-      ```
-
-* **Docker安装**
-
-  - [下载 Docker](https://docs.docker.com/get-docker/)
-  - 下载RedisManager
-
-    ```
-    > docker run -ti --rm -v ${HOME}:/root -v $(pwd):/git alpine/git clone https://github.com/skygreen2001/RedisManager.git
-    或
-    > docker run -ti --rm -v ${HOME}:/root -v $(pwd):/git alpine/git clone https://github.com.cnpmjs.org/skygreen2001/RedisManager
-    或
-    > docker run -ti --rm -v ${HOME}:/root -v $(pwd):/git alpine/git clone https://gitee.com/skygreen2015/RedisManager
-    ```
-
-* **Composer安装**
-
-  - 下载orm
-
-    ```
-    > composer create-project skygreen2001/orm orm
-    ```
+下载地址: https://gitee.com/skygreen2015/RedisManager.git
 
 ## 通常安装
 
@@ -89,63 +51,15 @@
 ### 其它安装
 
   - [安装 PhpRedis和PHP第三方库](install/README.md)
-    - 安装 PhpRedis  
-    - 安装PHP第三方库主要是用composer
+    - 安装 PhpRedis
 
-## Docker安装
-
-如果开发者熟悉Docker或者希望尝试通过Docker搭建开发环境(无需考虑因为操作系统，无法完整搭建应用运行环境，如在Mac操作系统下，因为权限问题无法安装php的zip或者redis，Mac Monterey版本后不再默认安装PHP), 可使用Docker安装
-
-* **安装Docker**
-
-  - [Get Docker](https://docs.docker.com/get-docker/)
-
-* **Docker帮助文档**
-
-  - [帮助文档](install/docker/README.md)
-
-### Docker Hub下载运行
-
-- 直接从Docker Hub拉取orm镜像并运行
-  - Docker Hub上查询镜像: https://hub.docker.com  -> 搜索: skygreen2021/orm
-  - 执行以下命令即可
-  
-    ```
-      docker run -dp 80:80 --name orm -t skygreen2021/orm
-    ```
-
-  - 停止应用     : docker stop orm
-  - 删除所有的容器: docker rm orm
-  - 删除生成的镜像: docker rmi skygreen2021/orm
-
-* **使用说明**
+## **使用说明**
 
 - 浏览器打开网页: http://localhost/www/index.html
 - 菜单选择: 设备 -> 设置 -> 新增
   - 服务器地址: redis
   - 端口     : 6379
   - 密码     : orm
-
-### 本地Docker 运行应用
-
-  - 根路径下运行以下指令执行操作
-  - 创建运行: docker-compose up -d
-  - 运行应用: docker-compose start
-  - 停止应用: docker-compose stop
-  - 进入应用: docker exec -it orm /bin/bash
-
-  - 删除所有的容器: docker-compose down
-  - 删除生成的镜像: docker rmi orm_nginx orm redis
-
-* **其它**
-
-  - [其它说明](install/docker/SETUP.md)
-
-## 云部署
-
-* [阿里云](https://market.aliyun.com/developer)
-* [Heroku](https://devcenter.heroku.com/categories/php)
-* [vagrant](https://app.vagrantup.com/laravel/boxes/homestead-7): https://segmentfault.com/a/1190000000264347
 
 ## 框架目录定义
 
@@ -182,21 +96,13 @@
 * [Atom IDE](https://ide.atom.io/)
 * [Sublime](http://www.sublimetext.com)
 
-    
-
 ## 参考资料
 
 * **Betterlife**
-  > https://threejs.org/docs/index.html#manual/en/introduction/How-to-run-things-locally
+  > https://gitee.com/skygreen2015/betterlife
 * **Betterlife.Front**
-  > https://github.com/skygreen2001/betterlife.front/tree/master/web/vuejs
+  > https://gitee.com/skygreen2015/betterlife.front
 * **Redis**
   > https://redis.io
 * **本地运行服务器**
-  > https://threejs.org/docs/index.html#manual/en/introduction/How-to-run-things-locally
-* **安装Composer**
-  > http://www.phpcomposer.com/
-
-* **Docker 安装 Redis 管理器**
-  > docker hub phpRedisAdmin: https://hub.docker.com/r/erikdubbelboer/phpredisadmin
-  > phpRedisAdmin: https://dubbelboer.com/phpRedisAdmin
+  > install/LINUX.md
