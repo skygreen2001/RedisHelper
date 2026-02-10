@@ -525,8 +525,12 @@ class Cache_Redis extends Cache_Base
                 break;
         }
 
-        if (@unserialize($data)) {
-            $data = unserialize($data);
+        if (is_array($data)||is_object($data)) {
+            return $data;
+        } else {
+            if ( @unserialize($data) ) {
+                $data = unserialize($data);
+            }
         }
         return $data;
     }
