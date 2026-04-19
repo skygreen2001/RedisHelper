@@ -1,4 +1,8 @@
-# Online Redis Manager
+# Redis 小助手
+
+懂你的 Redis，更懂你。简单一点，效率翻篇。
+
+Manage Redis, the Easy Way.
 
 符合中国开发者思维方式的在线Redis管理工具的框架，设计初衷快捷、简单、实用。
 
