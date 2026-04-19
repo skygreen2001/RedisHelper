@@ -1,1 +1,1 @@
-# Online Redis Manager 1.0
+# Redis 小助手 1.0

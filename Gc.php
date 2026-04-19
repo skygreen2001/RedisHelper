@@ -28,7 +28,7 @@ class Gc {
      * @var string
      * @static
      */
-    public static $site_name = 'Online Redis Manager';
+    public static $site_name = 'Redis 小助手';
     /**
      * 网站应用的版本
      */
@@ -76,7 +76,7 @@ class Gc {
      * @var string
      * @static
      */
-    public static $appName='Online Redis Manager';
+    public static $appName='Redis 小助手';
     /**
      * 应用名的缩写
      */

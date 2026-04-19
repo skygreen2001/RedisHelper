@@ -1,8 +1,8 @@
-# Online Redis Manager 代码 Wiki
+# Redis 小助手 代码 Wiki
 
 ## 1. 项目概述
 
-Online Redis Manager 是一个符合中国开发者思维方式的在线Redis管理工具框架，设计初衷是快捷、简单、实用。
+Redis 小助手 是一个符合中国开发者思维方式的在线Redis管理工具框架，设计初衷是快捷、简单、实用。
 
 - **前端技术栈**：Vuejs、iView框架
 - **后端技术栈**：PHP、PhpRedis扩展、PhpSpreadsheet框架
