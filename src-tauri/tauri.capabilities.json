@@ -1,0 +1,28 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schemas/desktop-capabilities.schema.json",
+  "identifier": "main",
+  "description": "Redis Helper main capabilities",
+  "windows": ["main"],
+  "permissions": [
+    {
+      "name": "fs:allow-read",
+      "all": true
+    },
+    {
+      "name": "fs:allow-write",
+      "all": true
+    },
+    {
+      "name": "dialog:allow-show",
+      "all": true
+    },
+    {
+      "name": "dialog:allow-save",
+      "all": true
+    },
+    {
+      "name": "dialog:allow-open",
+      "all": true
+    }
+  ]
+}

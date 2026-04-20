@@ -1,113 +1,103 @@
-# Redis 小助手
+# Redis小助手
 
-懂你的 Redis，更懂你。简单一点，效率翻篇。
+Redis小助手是一个基于Tauri 2.0框架开发的跨平台Redis管理工具，提供简单、直观的Redis服务器管理和数据操作功能。
 
-Manage Redis, the Easy Way.
+## 功能特性
 
-符合中国开发者思维方式的在线Redis管理工具的框架，设计初衷快捷、简单、实用。
+- **多服务器管理**：添加、编辑、删除Redis服务器配置
+- **数据库管理**：切换和管理不同的Redis数据库
+- **键值操作**：查看、添加、编辑、删除Redis键值
+- **数据类型支持**：支持String、List、Set、ZSet、Hash五种核心数据类型
+- **搜索功能**：按模式搜索键
+- **数据导入导出**：支持批量操作数据
+- **配置存储**：本地存储服务器配置
 
-主要采用betterlife框架、betterlife.front框架中[web/vuejs]模块快速开发而成。
+## 技术栈
 
-底层前端主要使用了Vuejs、iView框架；后端使用了PhpRedis、PhpSpreadsheet框架。
+- **前端**：Vue 3 + TypeScript + Element Plus + Pinia
+- **后端**：Rust + Tauri 2.0 + redis-rs
+- **构建工具**：Vite
 
-## 帮助文档
+## 安装步骤
 
-- [帮助文档](help/HELP.md)
+### 环境要求
 
-## 下载源码
+- Node.js v16+ 
+- Rust 最新稳定版
+- Tauri CLI
 
-下载地址: https://gitee.com/skygreen2015/RedisManager.git
+### 安装依赖
 
-## 通常安装
+```bash
+# 安装前端依赖
+npm install
 
-### 运行环境安装
+# 安装Tauri CLI（如果未安装）
+npm install -g @tauri-apps/cli
+```
 
-  以下工具任选一种即可
+### 开发模式运行
 
-  - [ampps](http://www.ampps.com)
+```bash
+# 启动开发服务器
+npm run tauri dev
+```
 
-    可以直接在它上面下载安装(Wamp|Lamp|Mamp)
+### 构建应用
 
-  - [Wamp](http://www.wampserver.com/en/)
+```bash
+# 构建前端
+npm run build
 
-    Windows下的Apache + Mysql + PHP
-    [PhpStudy]: http://www.phpstudy.net/
+# 打包应用
+npm run tauri build
+```
 
-  - [Lamp](https://lamp.sh/)
+## 使用方法
 
-    LAMP指的Linux、Apache，MySQL和PHP的第一个字母
-    [安装详细说明]: http://blog.csdn.net/skygreen_2001/article/details/19912159
+1. **添加服务器**：在"服务器设置"页面添加Redis服务器配置
+2. **连接服务器**：在主界面选择服务器和数据库
+3. **管理键值**：查看、添加、编辑、删除键值
+4. **搜索键**：使用搜索框按模式搜索键
+5. **导入导出**：导出数据为JSON格式或从JSON文件导入数据
 
-  - [Mamp](http://www.mamp.info/en/)
+## 项目结构
 
-    Mac环境下搭建 Apache/Nginx、MySQL、Perl/PHP/Python 平台。
+```
+redis/
+├── src/
+│   └── frontend/       # 前端代码
+│       ├── views/         # 页面
+│       ├── stores/        # 状态管理
+│       ├── App.vue        # 根组件
+│       └── main.ts        # 入口文件
+├── src-tauri/           # Rust后端代码
+│   ├── src/           # Rust源码
+│   │   ├── commands/  # Tauri命令
+│   │   ├── redis/     # Redis操作
+│   │   ├── storage/   # 存储管理
+│   │   └── main.rs    # 主入口
+│   ├── icons/           # 应用图标
+│   ├── Cargo.toml     # Rust依赖
+│   └── tauri.conf.json    # Tauri配置
+├── index.html             # HTML模板
+├── package.json           # 前端依赖
+├── tsconfig.json          # TypeScript配置
+├── tsconfig.node.json    # TypeScript Node配置
+├── vite.config.ts         # Vite配置
+└── README.md              # 项目说明
+```
 
-  - [Xampp](https://www.apachefriends.org/zh_cn/index.html)
+## 注意事项
 
-    XAMPP是完全免费且易于安装的Apache发行版，其中包含MariaDB、PHP和Perl。
+- 本应用使用本地JSON文件存储服务器配置，配置文件位于 `~/.redis-helper/config.json`
+- 导入导出功能暂时使用默认路径 `/tmp/redis-export.json`，后续版本将支持文件选择对话框
+- 应用需要网络权限以连接Redis服务器
 
-  - [宝塔](https://www.bt.cn/)
+## 版本历史
 
-  - [PhpStud](https://www.xp.cn/)
+- v0.1.0：初始版本，实现核心功能
 
-  - 本地运行PHP server: php -S localhost:8000)
+## 许可证
 
-### 其它安装
-
-  - [安装 PhpRedis和PHP第三方库](install/README.md)
-    - 安装 PhpRedis
-
-## **使用说明**
-
-- 浏览器打开网页: http://localhost/www/index.html
-- 菜单选择: 设备 -> 设置 -> 新增
-  - 服务器地址: redis
-  - 端口     : 6379
-  - 密码     : orm
-
-## 框架目录定义
-
-  - core   : 框架核心支持文件
-    - core/config      : 配置文件[各个功能模块]
-    - core/include     : 常用的函数库
-  - install: 安装目录
-  - api    : ajax请求服务端服务支持[手机或Web前端ajax请求返回json数据]
-  - www    : redis在线编辑器前端页面
-  - log    : 日志目录，每天一个调试测试日志文件放在这里
-  - upload : 后台上传下载文件(如excel)放置目录 
-
-## 服务器配置模式
-
-  - 在 www/js/main.js 里配置 isConfigLocal
-    - isConfigLocal: true, 意味着服务器配置都持久化存储在本地
-    - isConfigLocal: false, 意味着服务器配置都持久化存储在服务器上，建议内部本地使用，可只需配置一次。
-    - 默认存储在本地浏览器localStorage里，确保使用工具千人千面。
-
-
-## 目录权限设置
-
-  - 如果是Linux、Mac 系统，需要设置以下目录权限为完全可读写。
-    - log     
-    - upload 
-    - 执行命令如下:
-      > sudo mkdir log/ upload/
-      > sudo chmod -R 0777 log/ upload/
-
-## 开发工具
-
-* [TRAE CN](https://www.trae.cn/)
-* [Visual Studio Code](https://code.visualstudio.com/)
-* [Atom](https://atom.io)
-* [Atom IDE](https://ide.atom.io/)
-* [Sublime](http://www.sublimetext.com)
-
-## 参考资料
-
-* **Betterlife**
-  > https://gitee.com/skygreen2015/betterlife
-* **Betterlife.Front**
-  > https://gitee.com/skygreen2015/betterlife.front
-* **Redis**
-  > https://redis.io
-* **本地运行服务器**
-  > install/LINUX.md
+MIT License
