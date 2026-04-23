@@ -1128,4 +1128,6 @@ onMounted(async () => {
 :deep(.el-textarea__inner:focus) {
   box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
 }
+
+
 </style>

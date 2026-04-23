@@ -1,19 +1,6 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 
-// 简化的 Tauri 环境检测
-function isTauri(): boolean {
-  try {
-    if (typeof window === 'undefined') return false
-    const win = window as any
-    // 只要有 Tauri 相关对象就认为是 Tauri 环境
-    return !!(win.__TAURI__ || win.__TAURI_IPC__)
-  } catch (e) {
-    console.warn('Tauri检测失败:', e)
-    return false
-  }
-}
-
 interface ConnectRequest {
   host: string
   port: number
