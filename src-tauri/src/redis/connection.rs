@@ -141,4 +141,9 @@ impl RedisConnection {
         let keys: Vec<String> = self.conn.keys(pattern)?;
         Ok(keys)
     }
+    
+    pub fn flushdb(&mut self) -> Result<(), Box<dyn Error>> {
+        let _: () = redis::cmd("FLUSHDB").query(&mut self.conn)?;
+        Ok(())
+    }
 }

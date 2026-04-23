@@ -1,6 +1,19 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 
+// 简化的 Tauri 环境检测
+function isTauri(): boolean {
+  try {
+    if (typeof window === 'undefined') return false
+    const win = window as any
+    // 只要有 Tauri 相关对象就认为是 Tauri 环境
+    return !!(win.__TAURI__ || win.__TAURI_IPC__)
+  } catch (e) {
+    console.warn('Tauri检测失败:', e)
+    return false
+  }
+}
+
 interface ConnectRequest {
   host: string
   port: number
@@ -68,7 +81,7 @@ export const redisStore = defineStore('redis', {
     
     async getDatabases(params: ConnectRequest): Promise<Array<[number, number]>> {
       try {
-        return await invoke('get_databases', { req: params })
+        return await invoke<Array<[number, number]>>('get_databases', { req: params })
       } catch (error) {
         console.error('获取数据库失败:', error)
         throw error
@@ -77,7 +90,7 @@ export const redisStore = defineStore('redis', {
     
     async getKeys(params: ConnectRequest): Promise<string[]> {
       try {
-        return await invoke('get_keys', { req: params })
+        return await invoke<string[]>('get_keys', { req: params })
       } catch (error) {
         console.error('获取键失败:', error)
         throw error
@@ -86,7 +99,7 @@ export const redisStore = defineStore('redis', {
     
     async getKeyValue(params: KeyRequest): Promise<KeyValueResponse> {
       try {
-        return await invoke('get_key_value', { req: params })
+        return await invoke<KeyValueResponse>('get_key_value', { req: params })
       } catch (error) {
         console.error('获取键值失败:', error)
         throw error
@@ -95,7 +108,7 @@ export const redisStore = defineStore('redis', {
     
     async setKeyValue(params: KeyValueRequest): Promise<boolean> {
       try {
-        return await invoke('set_key_value', { req: params })
+        return await invoke<boolean>('set_key_value', { req: params })
       } catch (error) {
         console.error('设置键值失败:', error)
         throw error
@@ -104,7 +117,7 @@ export const redisStore = defineStore('redis', {
     
     async deleteKey(params: KeyRequest): Promise<boolean> {
       try {
-        return await invoke('delete_key', { req: params })
+        return await invoke<boolean>('delete_key', { req: params })
       } catch (error) {
         console.error('删除键失败:', error)
         throw error
@@ -113,7 +126,7 @@ export const redisStore = defineStore('redis', {
     
     async searchKeys(params: SearchRequest): Promise<string[]> {
       try {
-        return await invoke('search_keys', { req: params })
+        return await invoke<string[]>('search_keys', { req: params })
       } catch (error) {
         console.error('搜索键失败:', error)
         throw error
@@ -122,7 +135,7 @@ export const redisStore = defineStore('redis', {
     
     async exportData(params: ExportRequest): Promise<boolean> {
       try {
-        return await invoke('export_data', { req: params })
+        return await invoke<boolean>('export_data', { req: params })
       } catch (error) {
         console.error('导出数据失败:', error)
         throw error
@@ -131,9 +144,27 @@ export const redisStore = defineStore('redis', {
     
     async importData(params: ExportRequest): Promise<boolean> {
       try {
-        return await invoke('import_data', { req: params })
+        return await invoke<boolean>('import_data', { req: params })
       } catch (error) {
         console.error('导入数据失败:', error)
+        throw error
+      }
+    },
+    
+    async createDatabase(params: ConnectRequest): Promise<boolean> {
+      try {
+        return await invoke<boolean>('create_database', { req: params })
+      } catch (error) {
+        console.error('创建数据库失败:', error)
+        throw error
+      }
+    },
+    
+    async deleteDatabase(params: ConnectRequest): Promise<boolean> {
+      try {
+        return await invoke<boolean>('delete_database', { req: params })
+      } catch (error) {
+        console.error('删除数据库失败:', error)
         throw error
       }
     }

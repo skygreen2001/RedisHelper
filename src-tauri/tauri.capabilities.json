@@ -23,6 +23,18 @@
     {
       "name": "dialog:allow-open",
       "all": true
+    },
+    {
+      "name": "core:allow-command",
+      "allow": ["add_server", "edit_server", "delete_server", "get_servers", "test_connection"]
+    },
+    {
+      "name": "core:allow-command",
+      "allow": ["connect", "get_databases", "get_keys", "get_key_value", "set_key_value", "delete_key", "search_keys", "create_database", "delete_database"]
+    },
+    {
+      "name": "core:allow-command",
+      "allow": ["export_data", "import_data"]
     }
   ]
 }

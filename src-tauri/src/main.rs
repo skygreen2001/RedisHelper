@@ -21,6 +21,8 @@ fn main() {
             commands::redis::set_key_value,
             commands::redis::delete_key,
             commands::redis::search_keys,
+            commands::redis::create_database,
+            commands::redis::delete_database,
             commands::export::export_data,
             commands::export::import_data
         ])

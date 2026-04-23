@@ -129,3 +129,28 @@ pub fn search_keys(req: SearchRequest) -> Result<Vec<String>, String> {
         Err(e) => Err(e.to_string()),
     }
 }
+
+#[tauri::command]
+pub fn create_database(req: ConnectRequest) -> Result<bool, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            // Redis会自动创建不存在的数据库，只需要切换到该数据库即可
+            Ok(true)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn delete_database(req: ConnectRequest) -> Result<bool, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            // 清空数据库
+            conn.flushdb().map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
