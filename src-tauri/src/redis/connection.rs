@@ -36,7 +36,7 @@ impl RedisConnection {
     pub fn get_databases(&mut self) -> Result<Vec<(u8, usize)>, Box<dyn Error>> {
         let mut databases = Vec::new();
         
-        // 尝试检查0-15号数据库
+        // 尝试检查0-15号数据库，只返回有key的数据库
         for db in 0..16 {
             self.select(db)?;
             let keys: Vec<String> = self.conn.keys("*")?;

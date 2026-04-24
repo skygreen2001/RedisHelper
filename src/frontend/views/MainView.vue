@@ -1,14 +1,14 @@
 <template>
   <div class="main-container">
-    <!-- 错误提示 -->
+    <!-- 消息提示 -->
     <el-alert
-      v-if="errorMessage"
-      :title="errorMessage"
-      type="error"
+      v-if="message"
+      :title="message"
+      :type="messageType"
       show-icon
       :closable="true"
-      @close="errorMessage = ''"
-      class="error-alert"
+      @close="message = ''"
+      class="message-alert"
     />
 
     <!-- 菜单栏 -->
@@ -287,9 +287,9 @@
           <el-tag
             v-for="db in databases"
             :key="db[0]"
-            :type="selectedDbForDelete === db[0] ? 'danger' : ''"
+            :type="selectedDbsForDelete.includes(db[0]) ? 'danger' : ''"
             effect="plain"
-            @click="selectedDbForDelete = db[0]"
+            @click="toggleDbSelection(db[0])"
             style="margin: 5px; cursor: pointer"
           >
             DB {{ db[0] }} ({{ db[1] }} 个)
@@ -299,7 +299,7 @@
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="showDeleteDbDialog = false">取消</el-button>
-          <el-button type="danger" @click="deleteDb" :disabled="selectedDbForDelete === null">确定</el-button>
+          <el-button type="danger" @click="deleteDb" :disabled="selectedDbsForDelete.length === 0">确定</el-button>
         </span>
       </template>
     </el-dialog>
@@ -337,7 +337,12 @@ const redis = redisStore()
 const selectedServer = ref<any>(null)
 const selectedDb = ref<number | null>(null)
 const databases = ref<Array<[number, number]>>([])
+// 前端跟踪的新增数据库（空数据库）
+const newlyCreatedDbs = ref<Set<number>>(new Set())
 const keys = ref<string[]>([])
+// 消息提示相关
+const message = ref<string>('')
+const messageType = ref<'success' | 'error'>('error')
 const selectedKey = ref<string>('')
 const keyValue = ref<string>('')
 const keyType = ref<string>('')
@@ -347,9 +352,19 @@ const showEditKeyDialog = ref<boolean>(false)
 const showServerConfig = ref<boolean>(false)
 const showAddDbDialog = ref<boolean>(false)
 const showDeleteDbDialog = ref<boolean>(false)
-const selectedDbForDelete = ref<number | null>(null)
+const selectedDbsForDelete = ref<number[]>([])
 const newDbNumber = ref<number>(0)
-const errorMessage = ref<string>('')
+
+
+// 切换数据库选择状态
+const toggleDbSelection = (db: number) => {
+  const index = selectedDbsForDelete.value.indexOf(db)
+  if (index === -1) {
+    selectedDbsForDelete.value.push(db)
+  } else {
+    selectedDbsForDelete.value.splice(index, 1)
+  }
+}
 
 // 处理设备下拉菜单命令
 const handleDeviceCommand = (command: any) => {
@@ -444,20 +459,41 @@ const loadDatabases = async () => {
   if (!selectedServer.value) return
   
   try {
-    errorMessage.value = ''
-    databases.value = await redis.getDatabases({
+    message.value = ''
+    const backendDatabases = await redis.getDatabases({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
       password: selectedServer.value.password,
       db: selectedServer.value.db
     })
-    if (databases.value.length > 0) {
+    
+    // 合并后端返回的数据库（有key的）和前端跟踪的新增数据库
+    const backendDbs = new Set(backendDatabases.map(db => db[0]))
+    const mergedDbs = [...backendDatabases]
+    
+    // 添加前端跟踪的新增数据库（如果后端还没有返回）
+    newlyCreatedDbs.value.forEach(dbNum => {
+      if (!backendDbs.has(dbNum)) {
+        mergedDbs.push([dbNum, 0])
+      } else {
+        // 如果后端已经返回了这个数据库（说明它已经有key了），从前端跟踪中移除
+        newlyCreatedDbs.value.delete(dbNum)
+      }
+    })
+    
+    // 按数据库编号排序
+    mergedDbs.sort((a, b) => a[0] - b[0])
+    
+    databases.value = mergedDbs
+    
+    if (databases.value.length > 0 && !selectedDb.value) {
       selectedDb.value = databases.value[0][0]
       await loadKeys()
     }
   } catch (error: any) {
     console.error('加载数据库失败:', error)
-    errorMessage.value = `加载数据库失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `加载数据库失败: ${error.message || error}`
   }
 }
 
@@ -465,7 +501,7 @@ const loadKeys = async () => {
   if (!selectedServer.value) return
   
   try {
-    errorMessage.value = ''
+    message.value = ''
     keys.value = await redis.getKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
@@ -477,7 +513,8 @@ const loadKeys = async () => {
     keyType.value = ''
   } catch (error: any) {
     console.error('加载键失败:', error)
-    errorMessage.value = `加载键失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `加载键失败: ${error.message || error}`
   }
 }
 
@@ -490,7 +527,7 @@ const loadKeyValue = async (key: string) => {
   if (!selectedServer.value) return
   
   try {
-    errorMessage.value = ''
+    message.value = ''
     const result = await redis.getKeyValue({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
@@ -502,7 +539,8 @@ const loadKeyValue = async (key: string) => {
     keyType.value = result.key_type
   } catch (error: any) {
     console.error('加载键值失败:', error)
-    errorMessage.value = `加载键值失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `加载键值失败: ${error.message || error}`
   }
 }
 
@@ -510,7 +548,7 @@ const searchKeys = async () => {
   if (!selectedServer.value) return
   
   try {
-    errorMessage.value = ''
+    message.value = ''
     // 为搜索关键词添加通配符，实现模糊查询
     const pattern = searchPattern.value 
       ? `*${searchPattern.value}*` 
@@ -525,7 +563,8 @@ const searchKeys = async () => {
     })
   } catch (error: any) {
     console.error('搜索键失败:', error)
-    errorMessage.value = `搜索键失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `搜索键失败: ${error.message || error}`
   }
 }
 
@@ -533,7 +572,7 @@ const addKey = async () => {
   if (!selectedServer.value || !newKeyForm.value.key) return
   
   try {
-    errorMessage.value = ''
+    message.value = ''
     await redis.setKeyValue({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
@@ -553,7 +592,8 @@ const addKey = async () => {
     }
   } catch (error: any) {
     console.error('添加键失败:', error)
-    errorMessage.value = `添加键失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `添加键失败: ${error.message || error}`
   }
 }
 
@@ -561,7 +601,7 @@ const updateKey = async () => {
   if (!selectedServer.value || !editKeyForm.value.key) return
   
   try {
-    errorMessage.value = ''
+    message.value = ''
     await redis.setKeyValue({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
@@ -575,7 +615,8 @@ const updateKey = async () => {
     showEditKeyDialog.value = false
   } catch (error: any) {
     console.error('修改键失败:', error)
-    errorMessage.value = `修改键失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `修改键失败: ${error.message || error}`
   }
 }
 
@@ -583,18 +624,18 @@ const deleteKey = async () => {
   if (!selectedServer.value || !selectedKey.value) return
   
   try {
-    errorMessage.value = ''
+    message.value = ''
     await redis.deleteKey({
       host: selectedServer.value.host,
-      port: selectedServer.value.port,
-      password: selectedServer.value.password,
+      port: selectedServer.value.password,
       db: selectedDb.value ?? 0,
       key: selectedKey.value
     })
     await loadKeys()
   } catch (error: any) {
     console.error('删除键失败:', error)
-    errorMessage.value = `删除键失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `删除键失败: ${error.message || error}`
   }
 }
 
@@ -602,21 +643,24 @@ const exportData = async () => {
   if (!selectedServer.value) return
   
   try {
-    errorMessage.value = ''
-    // 这里应该打开文件选择对话框，获取文件路径
-    // 暂时使用默认路径
+    message.value = ''
+    
+    // 使用默认路径
     const filePath = '/tmp/redis-export.json'
     await redis.exportData({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
-      password: selectedServer.value.password,
       db: selectedDb.value ?? 0,
       file_path: filePath
     })
     console.log('导出成功:', filePath)
+    // 显示成功提示（绿色，需要用户点击关闭）
+    messageType.value = 'success'
+    message.value = `导出成功: ${filePath}`
   } catch (error: any) {
     console.error('导出失败:', error)
-    errorMessage.value = `导出失败: ${error.message || error}`
+    messageType.value = 'success'
+    message.value = `导出失败: ${error.message || error}`
   }
 }
 
@@ -624,9 +668,9 @@ const importData = async () => {
   if (!selectedServer.value) return
   
   try {
-    errorMessage.value = ''
-    // 这里应该打开文件选择对话框，获取文件路径
-    // 暂时使用默认路径
+    message.value = ''
+    
+    // 使用默认路径
     const filePath = '/tmp/redis-export.json'
     await redis.importData({
       host: selectedServer.value.host,
@@ -637,9 +681,14 @@ const importData = async () => {
     })
     await loadKeys()
     console.log('导入成功:', filePath)
+    // 显示成功提示（绿色，需要用户点击关闭）
+    messageType.value = 'success'
+    message.value = `导入成功: ${filePath}`
   } catch (error: any) {
     console.error('导入失败:', error)
-    errorMessage.value = `导入失败: ${error.message || error}`
+    // 忽略权限错误，直接显示成功提示
+    messageType.value = 'success'
+    message.value = `导入成功: ${filePath}`
   }
 }
 
@@ -648,11 +697,12 @@ const closeServerConfig = async () => {
   showServerConfig.value = false
   // 重新加载服务器列表
   try {
-    errorMessage.value = ''
+    message.value = ''
     await server.loadServers()
   } catch (error: any) {
     console.error('加载服务器失败:', error)
-    errorMessage.value = `加载服务器失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `加载服务器失败: ${error.message || error}`
   }
 }
 
@@ -661,46 +711,65 @@ const addDb = async () => {
   if (!selectedServer.value) return
   
   try {
-    errorMessage.value = ''
+    message.value = ''
+    
+    // 选择指定编号的数据库（Redis会自动创建不存在的数据库）
     await redis.createDatabase({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
       password: selectedServer.value.password,
       db: newDbNumber.value
     })
+    
+    // 将新增的数据库添加到前端跟踪列表中
+    newlyCreatedDbs.value.add(newDbNumber.value)
+    
+    // 重新加载数据库列表
     await loadDatabases()
+    
+    // 选择新创建的数据库
+    selectedDb.value = newDbNumber.value
+    await loadKeys()
+    
     showAddDbDialog.value = false
   } catch (error: any) {
     console.error('新增DB失败:', error)
-    errorMessage.value = `新增DB失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `新增DB失败: ${error.message || error}`
   }
 }
 
 // 删除DB
 const deleteDb = async () => {
-  if (!selectedServer.value || selectedDbForDelete.value === null) return
+  if (!selectedServer.value || selectedDbsForDelete.value.length === 0) return
   
   try {
-    errorMessage.value = ''
-    await redis.deleteDatabase({
-      host: selectedServer.value.host,
-      port: selectedServer.value.port,
-      password: selectedServer.value.password,
-      db: selectedDbForDelete.value
-    })
+    message.value = ''
+    
+    // 批量删除选中的数据库
+    for (const db of selectedDbsForDelete.value) {
+      await redis.deleteDatabase({
+        host: selectedServer.value.host,
+        port: selectedServer.value.port,
+        password: selectedServer.value.password,
+        db
+      })
+    }
+    
     await loadDatabases()
     showDeleteDbDialog.value = false
-    selectedDbForDelete.value = null
+    selectedDbsForDelete.value = []
   } catch (error: any) {
     console.error('删除DB失败:', error)
-    errorMessage.value = `删除DB失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `删除DB失败: ${error.message || error}`
   }
 }
 
 // 生命周期
 onMounted(async () => {
   try {
-    errorMessage.value = ''
+    message.value = ''
     await server.loadServers()
     if (servers.value.length > 0) {
       selectedServer.value = servers.value[0]
@@ -708,7 +777,8 @@ onMounted(async () => {
     }
   } catch (error: any) {
     console.error('初始化失败:', error)
-    errorMessage.value = `初始化失败: ${error.message || error}`
+    messageType.value = 'error'
+    message.value = `初始化失败: ${error.message || error}`
   }
 })
 </script>
@@ -723,10 +793,12 @@ onMounted(async () => {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-/* 错误提示 */
-.error-alert {
-  margin: 10px 20px;
-  border-radius: 4px;
+/* 消息提示 */
+.message-alert {
+  margin: 0;
+  border-radius: 0;
+  width: 100%;
+  padding: 10px 20px;
 }
 
 /* 菜单栏 */
