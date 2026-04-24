@@ -162,3 +162,19 @@ redis/
 ## 许可证
 
 MIT License
+
+## 贡献
+
+欢迎贡献代码！请提交Pull Request或打开Issue。
+
+## 贡献指南
+
+1. **提交Pull Request**：在项目仓库打开Pull Request，描述你的贡献内容。
+2. **打开Issue**：如果有问题或建议，打开Issue并详细描述。
+3. **代码规范**：请遵循Vue 3、TypeScript、Element Plus、Pinia的代码规范。
+4. **测试**：在本地测试你的贡献，确保不会引入新的问题。
+5. **文档**：如果有必要，更新项目文档。
+
+## 贡献者
+
+- [TAURI](https://tauri.app/): https://tauri.app/
