@@ -154,6 +154,15 @@ export const redisStore = defineStore('redis', {
         console.error('删除数据库失败:', error)
         throw error
       }
+    },
+    
+    async flushDatabase(params: ConnectRequest): Promise<boolean> {
+      try {
+        return await invoke<boolean>('flush_database', { req: params })
+      } catch (error) {
+        console.error('清空数据库失败:', error)
+        throw error
+      }
     }
   }
 })

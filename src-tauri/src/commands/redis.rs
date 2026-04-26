@@ -154,3 +154,16 @@ pub fn delete_database(req: ConnectRequest) -> Result<bool, String> {
         Err(e) => Err(e.to_string()),
     }
 }
+
+#[tauri::command]
+pub fn flush_database(req: ConnectRequest) -> Result<bool, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            // 清空数据库
+            conn.flushdb().map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}

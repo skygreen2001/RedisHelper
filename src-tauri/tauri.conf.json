@@ -32,6 +32,9 @@
       "timestampUrl": ""
     }
   },
+  "plugins": {
+    "dialog": null
+  },
   "app": {
     "security": {
       "csp": null

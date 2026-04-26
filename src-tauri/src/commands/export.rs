@@ -24,6 +24,15 @@ pub struct ImportRequest {
 
 #[tauri::command]
 pub fn export_data(req: ExportRequest) -> Result<bool, String> {
+    println!("导出请求：{:?}", req);
+    println!("导出文件路径：{}", req.file_path);
+    println!("路径是否以/开头：{}", req.file_path.starts_with('/'));
+    
+    // 验证文件路径
+    if req.file_path.is_empty() {
+        return Err("文件路径不能为空".to_string());
+    }
+    
     match RedisConnection::new(&req.host, req.port, req.password) {
         Ok(mut conn) => {
             conn.select(req.db).map_err(|e| e.to_string())?;
@@ -44,12 +53,23 @@ pub fn export_data(req: ExportRequest) -> Result<bool, String> {
             }
             
             let json_data = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-            let mut file = File::create(&req.file_path).map_err(|e| e.to_string())?;
-            file.write_all(json_data.as_bytes()).map_err(|e| e.to_string())?;
+            println!("开始写入文件...");
+            let mut file = File::create(&req.file_path).map_err(|e| {
+                println!("创建文件失败：{}", e);
+                e.to_string()
+            })?;
+            file.write_all(json_data.as_bytes()).map_err(|e| {
+                println!("写入文件失败：{}", e);
+                e.to_string()
+            })?;
+            println!("文件写入成功：{}", req.file_path);
             
             Ok(true)
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => {
+            println!("Redis连接失败：{}", e);
+            Err(e.to_string())
+        }
     }
 }
 

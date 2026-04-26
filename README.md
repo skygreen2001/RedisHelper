@@ -178,3 +178,4 @@ MIT License
 ## 贡献者
 
 - [TAURI](https://tauri.app/): https://tauri.app/
+- [TAURI GitHub](https://github.com/tauri-apps/tauri): https://github.com/tauri-apps/tauri

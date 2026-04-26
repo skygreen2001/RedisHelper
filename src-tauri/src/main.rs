@@ -8,6 +8,7 @@ use tauri::Builder;
 
 fn main() {
     Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::server::add_server,
             commands::server::edit_server,
@@ -23,6 +24,7 @@ fn main() {
             commands::redis::search_keys,
             commands::redis::create_database,
             commands::redis::delete_database,
+            commands::redis::flush_database,
             commands::export::export_data,
             commands::export::import_data
         ])

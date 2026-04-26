@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Redis Helper main capabilities",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}
