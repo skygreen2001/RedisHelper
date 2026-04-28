@@ -177,5 +177,11 @@ MIT License
 
 ## 贡献者
 
+- [Vue 3](https://vuejs.org/): https://vuejs.org/
+- [Element Plus](https://element-plus.org/): https://element-plus.org/
+- [Pinia](https://pinia.vuejs.org/): https://pinia.vuejs.org/
+- [TypeScript](https://www.typescriptlang.org/): https://www.typescriptlang.org/
+- [Rust](https://www.rust-lang.org/): https://www.rust-lang.org/
 - [TAURI](https://tauri.app/): https://tauri.app/
 - [TAURI GitHub](https://github.com/tauri-apps/tauri): https://github.com/tauri-apps/tauri
+- [TRAE SOLO CN](https://trae.cn/): https://trae.cn/
