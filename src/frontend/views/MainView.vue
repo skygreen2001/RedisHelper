@@ -393,13 +393,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, Close, More, Loading } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, Close, More } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
 import ServerConfigView from './ServerConfigView.vue'
-import { invoke } from '@tauri-apps/api/core'
-import { save, open } from '@tauri-apps/plugin-dialog'
-import { resolve, dirname } from '@tauri-apps/api/path'
+import { open } from '@tauri-apps/plugin-dialog'
+import { resolve } from '@tauri-apps/api/path'
 
 // 简化的 Tauri 环境检测
 function checkIsTauri(): boolean {
@@ -585,14 +584,6 @@ const keyTree = computed(() => {
     id: key,
     label: key
   }))
-})
-
-const formattedValue = computed(() => {
-  try {
-    return JSON.stringify(JSON.parse(keyValue.value), null, 2)
-  } catch {
-    return keyValue.value
-  }
 })
 
 
@@ -836,11 +827,12 @@ const selectExportFolder = async () => {
     
     if (selected !== null && selected !== undefined) {
       let folderPath = ''
+      const selectedItems = selected as string | string[]
       
-      if (typeof selected === 'string') {
-        folderPath = selected
-      } else if (Array.isArray(selected) && selected.length > 0) {
-        folderPath = selected[0]
+      if (typeof selectedItems === 'string') {
+        folderPath = selectedItems
+      } else if (Array.isArray(selectedItems) && selectedItems.length > 0) {
+        folderPath = selectedItems[0]
       }
       
       if (folderPath) {
@@ -931,9 +923,8 @@ onMounted(async () => {
         try {
           // 读取文件内容
           const reader = new FileReader()
-          reader.onload = async (e) => {
+          reader.onload = async () => {
             try {
-              const content = e.target?.result as string
               // 暂时使用默认路径，实际使用文件内容
               await redis.importData({
                 host: selectedServer.value?.host || '',
@@ -967,7 +958,7 @@ onMounted(async () => {
     folderInput.value = document.createElement('input')
     folderInput.value.type = 'file'
     folderInput.value.webkitdirectory = true
-    folderInput.value.directory = true
+    ;(folderInput.value as any).directory = true
     folderInput.value.style.display = 'none'
     document.body.appendChild(folderInput.value)
     
@@ -989,8 +980,9 @@ onMounted(async () => {
           console.log('文件对象属性:', Object.keys(firstFile))
           
           // 尝试不同的属性名获取路径
-          if (firstFile.path) {
-            selectedPath = firstFile.path
+          const fileWithPath = firstFile as File & { path?: string }
+          if (fileWithPath.path) {
+            selectedPath = fileWithPath.path
             console.log('从file.path获取的路径:', selectedPath)
           } else if ((firstFile as any).fullPath) {
             selectedPath = (firstFile as any).fullPath

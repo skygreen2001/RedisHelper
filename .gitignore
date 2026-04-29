@@ -3,3 +3,4 @@ src-tauri/target/
 .history/
 dist/
 .trae/
+src-tauri/Cargo.lock
