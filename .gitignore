@@ -4,3 +4,4 @@ src-tauri/target/
 dist/
 .trae/
 src-tauri/Cargo.lock
+src-tauri/gen/
