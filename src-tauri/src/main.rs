@@ -26,7 +26,14 @@ fn main() {
             commands::redis::delete_database,
             commands::redis::flush_database,
             commands::export::export_data,
-            commands::export::import_data
+            commands::export::import_data,
+            commands::trash::move_to_trash,
+            commands::trash::batch_move_to_trash,
+            commands::trash::get_trash_items,
+            commands::trash::restore_from_trash,
+            commands::trash::batch_restore_from_trash,
+            commands::trash::permanent_delete_trash,
+            commands::trash::clear_expired_trash
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

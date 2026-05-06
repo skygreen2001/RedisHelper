@@ -136,6 +136,14 @@ impl RedisConnection {
         let _: () = self.conn.del::<_, ()>(key)?;
         Ok(())
     }
+
+    pub fn delete_keys(&mut self, keys: &[&str]) -> Result<(), Box<dyn Error>> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let _: () = redis::cmd("DEL").arg(keys).query(&mut self.conn)?;
+        Ok(())
+    }
     
     pub fn search_keys(&mut self, pattern: &str) -> Result<Vec<String>, Box<dyn Error>> {
         let keys: Vec<String> = self.conn.keys(pattern)?;

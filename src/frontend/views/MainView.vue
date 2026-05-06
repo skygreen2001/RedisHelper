@@ -46,6 +46,10 @@
               >
                 DB {{ db[0] }} ({{ db[1] }} 个)
               </el-dropdown-item>
+              <el-dropdown-item divided command="trash">
+                <el-icon><FolderOpened /></el-icon> 废键箱
+                <el-badge v-if="currentServerTrashCount > 0" :value="currentServerTrashCount" class="menu-badge" />
+              </el-dropdown-item>
               <el-dropdown-item divided command="add">
                 <el-icon><Plus /></el-icon> 新增DB
               </el-dropdown-item>
@@ -60,12 +64,18 @@
 
     <!-- 状态栏 -->
     <div class="status-bar">
-      当前服务器: {{ selectedServer?.name || '未选择' }} > DB: {{ selectedDb !== null ? `db${selectedDb}` : '未选择' }} {{ databases.find(db => db[0] === selectedDb)?.[1] ? `(共计${databases.find(db => db[0] === selectedDb)?.[1]}个)` : '' }} > key: {{ selectedKey || '未选择' }}
+      <template v-if="!isTrashView">
+        当前服务器: {{ selectedServer?.name || '未选择' }} > DB: {{ selectedDb !== null ? `db${selectedDb}` : '未选择' }} {{ databases.find(db => db[0] === selectedDb)?.[1] ? `(共计${databases.find(db => db[0] === selectedDb)?.[1]}个)` : '' }} > key: {{ selectedKey || '未选择' }}
+      </template>
+      <template v-else>
+        废键箱 - {{ selectedServer?.name || selectedServer?.host }}:{{ selectedServer?.port }}
+      </template>
       <span v-if="isDebugMode" class="debug-info"> | {{ isRunningInTauri ? '✓ Tauri环境' : '✗ 浏览器环境' }}</span>
     </div>
 
     <!-- 键列表和值展示 -->
     <div class="content-area">
+      <template v-if="!isTrashView">
       <!-- 左侧键列表区 -->
       <div class="key-list">
         <!-- 搜索和操作栏 -->
@@ -101,6 +111,25 @@
             >
               搜索
             </el-button>
+            <el-button
+              :type="isMultiSelectMode ? 'warning' : 'default'"
+              size="small"
+              @click="toggleMultiSelectMode"
+              class="multi-select-btn"
+            >
+              <el-icon><Select /></el-icon>
+              <span>{{ isMultiSelectMode ? '取消多选' : '多选' }}</span>
+            </el-button>
+            <el-button
+              v-if="isMultiSelectMode && selectedKeys.length > 0"
+              type="danger"
+              size="small"
+              @click="batchMoveToTrash"
+              class="batch-delete-btn"
+            >
+              <el-icon><Delete /></el-icon>
+              <span>移入废键箱 ({{ selectedKeys.length }})</span>
+            </el-button>
             <el-dropdown @command="handleActionCommand" class="more-actions">
               <el-button
                 type="primary"
@@ -132,11 +161,26 @@
         <div class="key-list-content">
           <el-scrollbar>
             <el-tree
+              v-if="!isMultiSelectMode"
               :data="keyTree"
               node-key="id"
               default-expand-all
               @node-click="handleKeyClick"
               :highlight-current="true"
+              empty-text="暂无数据"
+            >
+              <template #default="{ node }">
+                <span class="key-item">{{ node.label }}</span>
+              </template>
+            </el-tree>
+            <el-tree
+              v-else
+              :data="keyTree"
+              node-key="id"
+              default-expand-all
+              show-checkbox
+              @check-change="handleCheckChange"
+              ref="treeRef"
               empty-text="暂无数据"
             >
               <template #default="{ node }">
@@ -177,6 +221,44 @@
           <el-empty description="暂无数据" />
         </div>
       </div>
+      </template>
+      <template v-else>
+        <div class="trash-view">
+          <div class="trash-toolbar">
+            <el-button type="primary" size="small" @click="loadTrashItems" :loading="trash.isLoading">
+              <el-icon><Refresh /></el-icon> 刷新
+            </el-button>
+            <el-button v-if="trashSelectedIds.length > 0" type="success" size="small" @click="batchRestoreFromTrash">
+              <el-icon><Refresh /></el-icon> 恢复选中 ({{ trashSelectedIds.length }})
+            </el-button>
+            <el-button v-if="trashSelectedIds.length > 0" type="danger" size="small" @click="permanentDeleteTrash">
+              <el-icon><Delete /></el-icon> 永久删除选中 ({{ trashSelectedIds.length }})
+            </el-button>
+            <el-button type="info" size="small" @click="clearExpiredTrash">清理过期项</el-button>
+          </div>
+          <div class="trash-list-content">
+            <el-table :data="trash.trashItems" @selection-change="handleTrashSelectionChange" empty-text="废键箱为空" stripe style="width:100%">
+              <el-table-column type="selection" width="40" />
+              <el-table-column prop="key" label="键名" min-width="200" show-overflow-tooltip />
+              <el-table-column prop="key_type" label="类型" width="80">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="getTypeTagColor(row.key_type)">{{ row.key_type.toUpperCase() }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="host" label="服务器" width="140" show-overflow-tooltip />
+              <el-table-column prop="db" label="DB" width="60" />
+              <el-table-column prop="deleted_at" label="删除时间" width="180" show-overflow-tooltip />
+              <el-table-column prop="expires_at" label="过期时间" width="180" show-overflow-tooltip />
+              <el-table-column label="操作" width="120" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="primary" link size="small" @click="restoreSingleItem(row.id)">恢复</el-button>
+                  <el-button type="danger" link size="small" @click="deleteSingleItem(row.id)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- 底部标题栏 -->
@@ -393,9 +475,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, Close, More } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, Close, More, Select, FolderOpened } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
+import { trashStore } from '../stores/trashStore'
+import { ElMessageBox } from 'element-plus'
 import ServerConfigView from './ServerConfigView.vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { resolve } from '@tauri-apps/api/path'
@@ -419,6 +503,7 @@ const isRunningInTauri = checkIsTauri()
 
 const server = serverStore()
 const redis = redisStore()
+const trash = trashStore()
 
 // 状态
 const selectedServer = ref<any>(null)
@@ -448,6 +533,13 @@ const exportFolderPath = ref<string>('/tmp')
 const isFolderLoading = ref<boolean>(false)
 // 清空配置
 const showFlushDialog = ref<boolean>(false)
+// 多选模式
+const isMultiSelectMode = ref<boolean>(false)
+const selectedKeys = ref<string[]>([])
+const treeRef = ref<any>(null)
+// 废键箱视图
+const isTrashView = ref<boolean>(false)
+const trashSelectedIds = ref<string[]>([])
 
 
 // 切换数据库选择状态
@@ -472,15 +564,19 @@ const handleDeviceCommand = (command: any) => {
 }
 
 // 处理DB下拉菜单命令
-const handleDbCommand = (command: any) => {
+const handleDbCommand = async (command: any) => {
   if (command === 'add') {
     // 新增DB逻辑
     showAddDbDialog.value = true
   } else if (command === 'delete') {
     // 删除DB逻辑
     showDeleteDbDialog.value = true
+  } else if (command === 'trash') {
+    isTrashView.value = true
+    await loadTrashItems()
   } else if (command.type === 'select') {
     selectedDb.value = command.db
+    isTrashView.value = false
     handleDbChange()
   }
 }
@@ -794,19 +890,25 @@ const updateKey = async () => {
 
 const deleteKey = async () => {
   if (!selectedServer.value || !selectedKey.value) return
-  
   try {
-    message.value = ''
-    await redis.deleteKey({
-      host: selectedServer.value.host,
-      port: selectedServer.value.port,
-      password: selectedServer.value.password,
-      db: selectedDb.value ?? 0,
-      key: selectedKey.value
+    await ElMessageBox.confirm('确定要删除该键吗？删除后将移入废键箱，7天后自动清除。', '确认删除', {
+      confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning',
     })
+    message.value = ''
+    await trash.moveToTrash({
+      host: selectedServer.value.host, port: selectedServer.value.port,
+      password: selectedServer.value.password, db: selectedDb.value ?? 0, key: selectedKey.value,
+    })
+    selectedKey.value = ''
+    keyValue.value = ''
+    keyType.value = ''
+    editKeyForm.value = { key: '', value: '', type: 'string' }
     await loadKeys()
+    await loadTrashItems()
+    messageType.value = 'success'
+    message.value = '已移入废键箱，7天后自动清除'
   } catch (error: any) {
-    console.error('删除键失败:', error)
+    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
     messageType.value = 'error'
     message.value = `删除键失败: ${error.message || error}`
   }
@@ -1171,6 +1273,187 @@ const deleteDb = async () => {
     message.value = `删除DB失败: ${error.message || error}`
   }
 }
+
+// ========== 废键箱相关方法 ==========
+
+// 切换多选模式
+const toggleMultiSelectMode = () => {
+  isMultiSelectMode.value = !isMultiSelectMode.value
+  if (!isMultiSelectMode.value) {
+    selectedKeys.value = []
+    if (treeRef.value) {
+      treeRef.value.setCheckedKeys([])
+    }
+  }
+}
+
+// 处理多选勾选变化
+const handleCheckChange = () => {
+  if (treeRef.value) {
+    selectedKeys.value = treeRef.value.getCheckedKeys(true)
+  }
+}
+
+// 批量移入废键箱
+const batchMoveToTrash = async () => {
+  if (!selectedServer.value || selectedKeys.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确定要将选中的 ${selectedKeys.value.length} 个键移入废键箱吗？`,
+      '批量移入废键箱',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+    )
+    message.value = ''
+    for (const key of selectedKeys.value) {
+      await trash.moveToTrash({
+        host: selectedServer.value.host,
+        port: selectedServer.value.port,
+        password: selectedServer.value.password,
+        db: selectedDb.value ?? 0,
+        key,
+      })
+    }
+    await loadKeys()
+    await loadTrashItems()
+    isMultiSelectMode.value = false
+    selectedKeys.value = []
+    if (treeRef.value) {
+      treeRef.value.setCheckedKeys([])
+    }
+    messageType.value = 'success'
+    message.value = `已将 ${selectedKeys.value.length} 个键移入废键箱`
+  } catch (error: any) {
+    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
+    messageType.value = 'error'
+    message.value = `批量移入废键箱失败: ${error.message || error}`
+  }
+}
+
+// 加载废键箱数据
+const loadTrashItems = async () => {
+  if (!selectedServer.value) return
+  try {
+    await trash.getTrashItems(selectedServer.value.host, selectedServer.value.port)
+  } catch (error: any) {
+    messageType.value = 'error'
+    message.value = `加载废键箱失败: ${error.message || error}`
+  }
+}
+
+// 处理废键箱表格选择变化
+const handleTrashSelectionChange = (selection: any[]) => {
+  trashSelectedIds.value = selection.map((item: any) => item.id)
+}
+
+// 恢复单个废键箱项
+const restoreSingleItem = async (id: string) => {
+  try {
+    message.value = ''
+    await trash.restoreFromTrash(id)
+    await loadTrashItems()
+    await loadKeys()
+    messageType.value = 'success'
+    message.value = '恢复成功'
+  } catch (error: any) {
+    messageType.value = 'error'
+    message.value = `恢复失败: ${error.message || error}`
+  }
+}
+
+// 批量恢复废键箱项
+const batchRestoreFromTrash = async () => {
+  if (trashSelectedIds.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确定要恢复选中的 ${trashSelectedIds.value.length} 项吗？`,
+      '批量恢复',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'info' }
+    )
+    message.value = ''
+    await trash.batchRestoreFromTrash(trashSelectedIds.value)
+    await loadTrashItems()
+    await loadKeys()
+    messageType.value = 'success'
+    message.value = `已恢复 ${trashSelectedIds.value.length} 项`
+  } catch (error: any) {
+    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
+    messageType.value = 'error'
+    message.value = `批量恢复失败: ${error.message || error}`
+  }
+}
+
+// 永久删除单个废键箱项
+const deleteSingleItem = async (id: string) => {
+  try {
+    await ElMessageBox.confirm('确定要永久删除该项吗？此操作不可恢复。', '永久删除', {
+      confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning',
+    })
+    message.value = ''
+    await trash.permanentDelete([id])
+    await loadTrashItems()
+    messageType.value = 'success'
+    message.value = '已永久删除'
+  } catch (error: any) {
+    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
+    messageType.value = 'error'
+    message.value = `删除失败: ${error.message || error}`
+  }
+}
+
+// 永久删除选中的废键箱项
+const permanentDeleteTrash = async () => {
+  if (trashSelectedIds.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确定要永久删除选中的 ${trashSelectedIds.value.length} 项吗？此操作不可恢复。`,
+      '永久删除',
+      { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' }
+    )
+    message.value = ''
+    await trash.permanentDelete(trashSelectedIds.value)
+    await loadTrashItems()
+    messageType.value = 'success'
+    message.value = `已永久删除 ${trashSelectedIds.value.length} 项`
+  } catch (error: any) {
+    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
+    messageType.value = 'error'
+    message.value = `永久删除失败: ${error.message || error}`
+  }
+}
+
+// 清理过期废键箱项
+const clearExpiredTrash = async () => {
+  try {
+    message.value = ''
+    await trash.clearExpired()
+    await loadTrashItems()
+    messageType.value = 'success'
+    message.value = '已清理过期项'
+  } catch (error: any) {
+    messageType.value = 'error'
+    message.value = `清理过期项失败: ${error.message || error}`
+  }
+}
+
+// 获取类型标签颜色
+const getTypeTagColor = (type: string): string => {
+  const colorMap: Record<string, string> = {
+    string: '',
+    list: 'success',
+    set: 'warning',
+    zset: 'danger',
+    hash: 'info',
+  }
+  return colorMap[type] || ''
+}
+
+// 当前服务器废键箱数量
+const currentServerTrashCount = computed(() => {
+  if (!selectedServer.value) return 0
+  return trash.trashItems.filter(
+    (item: any) => item.host === selectedServer.value.host && item.port === selectedServer.value.port
+  ).length
+})
 </script>
 
 <style scoped>
@@ -1727,5 +2010,12 @@ const deleteDb = async () => {
   color: #f56c6c !important;
   font-weight: 500;
 }
+
+.multi-select-btn { margin-left: 10px; }
+.batch-delete-btn { margin-left: 10px; }
+.menu-badge { margin-left: 6px; }
+.trash-view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.trash-toolbar { padding: 12px 15px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #e4e7ed; background-color: #ffffff; }
+.trash-list-content { flex: 1; overflow: auto; padding: 0; }
 
 </style>
