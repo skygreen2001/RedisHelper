@@ -111,6 +111,8 @@
             >
               搜索
             </el-button>
+            <!-- 多选功能已屏蔽 -->
+            <!--
             <el-button
               :type="isMultiSelectMode ? 'warning' : 'default'"
               size="small"
@@ -130,6 +132,7 @@
               <el-icon><Delete /></el-icon>
               <span>移入废键箱 ({{ selectedKeys.length }})</span>
             </el-button>
+            -->
             <el-dropdown @command="handleActionCommand" class="more-actions">
               <el-button
                 type="primary"
@@ -475,7 +478,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, Close, More, Select, FolderOpened } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, Close, More, FolderOpened } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
 import { trashStore } from '../stores/trashStore'
@@ -511,6 +514,8 @@ const selectedDb = ref<number | null>(null)
 const databases = ref<Array<[number, number]>>([])
 // 前端跟踪的新增数据库（空数据库）
 const newlyCreatedDbs = ref<Set<number>>(new Set())
+// 记录所有曾经访问过（选中过）的 DB，即使变空也保留在列表中
+const visitedDbs = ref<Set<number>>(new Set())
 const keys = ref<string[]>([])
 // 消息提示相关
 const message = ref<string>('')
@@ -576,6 +581,7 @@ const handleDbCommand = async (command: any) => {
     await loadTrashItems()
   } else if (command.type === 'select') {
     selectedDb.value = command.db
+    visitedDbs.value.add(command.db)
     isTrashView.value = false
     handleDbChange()
   }
@@ -707,17 +713,23 @@ const loadDatabases = async () => {
       db: selectedServer.value.db
     })
     
-    // 合并后端返回的数据库（有key的）和前端跟踪的新增数据库
+    // 合并后端返回的数据库（有key的）和前端跟踪的数据库
     const backendDbs = new Set(backendDatabases.map(db => db[0]))
     const mergedDbs = [...backendDatabases]
-    
+
     // 添加前端跟踪的新增数据库（如果后端还没有返回）
     newlyCreatedDbs.value.forEach(dbNum => {
       if (!backendDbs.has(dbNum)) {
         mergedDbs.push([dbNum, 0])
       } else {
-        // 如果后端已经返回了这个数据库（说明它已经有key了），从前端跟踪中移除
         newlyCreatedDbs.value.delete(dbNum)
+      }
+    })
+
+    // 添加曾经访问过但已变空的数据库
+    visitedDbs.value.forEach(dbNum => {
+      if (!backendDbs.has(dbNum) && !newlyCreatedDbs.value.has(dbNum)) {
+        mergedDbs.push([dbNum, 0])
       }
     })
     
@@ -728,6 +740,7 @@ const loadDatabases = async () => {
     
     if (databases.value.length > 0 && !selectedDb.value) {
       selectedDb.value = databases.value[0][0]
+      visitedDbs.value.add(selectedDb.value)
       await loadKeys()
     }
   } catch (error: any) {
@@ -847,6 +860,7 @@ const addKey = async () => {
       key_type: newKeyForm.value.type
     })
     await loadKeys()
+    await loadDatabases()
     showAddKeyDialog.value = false
     // 重置表单
     newKeyForm.value = {
@@ -904,6 +918,7 @@ const deleteKey = async () => {
     keyType.value = ''
     editKeyForm.value = { key: '', value: '', type: 'string' }
     await loadKeys()
+    await loadDatabases()
     await loadTrashItems()
     messageType.value = 'success'
     message.value = '已移入废键箱，7天后自动清除'
@@ -1276,56 +1291,10 @@ const deleteDb = async () => {
 
 // ========== 废键箱相关方法 ==========
 
-// 切换多选模式
-const toggleMultiSelectMode = () => {
-  isMultiSelectMode.value = !isMultiSelectMode.value
-  if (!isMultiSelectMode.value) {
-    selectedKeys.value = []
-    if (treeRef.value) {
-      treeRef.value.setCheckedKeys([])
-    }
-  }
-}
-
 // 处理多选勾选变化
 const handleCheckChange = () => {
   if (treeRef.value) {
     selectedKeys.value = treeRef.value.getCheckedKeys(true)
-  }
-}
-
-// 批量移入废键箱
-const batchMoveToTrash = async () => {
-  if (!selectedServer.value || selectedKeys.value.length === 0) return
-  try {
-    await ElMessageBox.confirm(
-      `确定要将选中的 ${selectedKeys.value.length} 个键移入废键箱吗？`,
-      '批量移入废键箱',
-      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
-    )
-    message.value = ''
-    for (const key of selectedKeys.value) {
-      await trash.moveToTrash({
-        host: selectedServer.value.host,
-        port: selectedServer.value.port,
-        password: selectedServer.value.password,
-        db: selectedDb.value ?? 0,
-        key,
-      })
-    }
-    await loadKeys()
-    await loadTrashItems()
-    isMultiSelectMode.value = false
-    selectedKeys.value = []
-    if (treeRef.value) {
-      treeRef.value.setCheckedKeys([])
-    }
-    messageType.value = 'success'
-    message.value = `已将 ${selectedKeys.value.length} 个键移入废键箱`
-  } catch (error: any) {
-    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
-    messageType.value = 'error'
-    message.value = `批量移入废键箱失败: ${error.message || error}`
   }
 }
 
@@ -1352,6 +1321,7 @@ const restoreSingleItem = async (id: string) => {
     await trash.restoreFromTrash(id)
     await loadTrashItems()
     await loadKeys()
+    await loadDatabases()
     messageType.value = 'success'
     message.value = '恢复成功'
   } catch (error: any) {
@@ -1373,6 +1343,7 @@ const batchRestoreFromTrash = async () => {
     await trash.batchRestoreFromTrash(trashSelectedIds.value)
     await loadTrashItems()
     await loadKeys()
+    await loadDatabases()
     messageType.value = 'success'
     message.value = `已恢复 ${trashSelectedIds.value.length} 项`
   } catch (error: any) {
