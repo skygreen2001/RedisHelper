@@ -192,6 +192,45 @@
             </el-tree>
           </el-scrollbar>
         </div>
+
+        <!-- 分页加载控制区域：全部加载后完全隐藏，让出空间 -->
+        <div class="key-list-footer" v-if="hasMoreKeys || isLoadingAll || loadedCount === 0">
+
+          <!-- 加载所有进度显示 -->
+          <div class="loading-all-progress" v-if="isLoadingAll">
+            <el-progress
+              :percentage="keysTotal > 0 ? Math.round((loadedCount / keysTotal) * 100) : 0"
+              :show-text="true"
+              :stroke-width="10"
+              striped
+              striped-flow
+            />
+            <span class="loading-text">正在加载所有 keys... ({{ loadedCount }} / {{ keysTotal }})</span>
+          </div>
+
+          <!-- 加载按钮 + 数量显示 -->
+          <div class="load-actions" v-if="hasMoreKeys && !isLoadingAll">
+            <el-button
+              class="load-btn"
+              @click="handleLoadMore"
+              :loading="isLoadingMore"
+              :disabled="isLoadingAll"
+            >
+              加载更多
+            </el-button>
+            <span class="count-divider">
+              <template v-if="keysTotal > 0">{{ loadedCount }} / {{ keysTotal }}</template>
+              <template v-else>{{ loadedCount }} 个 keys</template>
+            </span>
+            <el-button
+              class="load-btn"
+              @click="handleLoadAll"
+              :disabled="isLoadingMore"
+            >
+              加载所有
+            </el-button>
+          </div>
+        </div>
       </div>
 
       <!-- 右侧值展示区 -->
@@ -477,7 +516,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, Close, More, FolderOpened } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
@@ -517,6 +556,16 @@ const newlyCreatedDbs = ref<Set<number>>(new Set())
 // 记录所有曾经访问过（选中过）的 DB，即使变空也保留在列表中
 const visitedDbs = ref<Set<number>>(new Set())
 const keys = ref<string[]>([])
+
+// ========== 分页加载相关状态 ==========
+const keysCursor = ref<number>(0)         // SCAN 游标
+const keysTotal = ref<number>(0)          // 总数量
+const isLoadingMore = ref<boolean>(false) // 加载更多中
+const isLoadingAll = ref<boolean>(false)  // 加载所有中
+const loadedCount = computed(() => keys.value.length)
+const hasMoreKeys = computed(() => keysCursor.value !== 0 || loadedCount.value < keysTotal.value)
+// ====================================
+
 // 消息提示相关
 const message = ref<string>('')
 const messageType = ref<'success' | 'error'>('error')
@@ -591,8 +640,8 @@ const handleDbCommand = async (command: any) => {
 const handleRefresh = async () => {
   // 清空搜索框
   searchPattern.value = ''
-  // 重新加载键列表
-  await loadKeys()
+  // 重新加载键列表（重置分页状态）
+  await loadKeys(true)
 }
 
 // 处理更多操作命令
@@ -698,7 +747,8 @@ const handleServerChange = async () => {
 }
 
 const handleDbChange = async () => {
-  await loadKeys()
+  // 切换 DB 时重置分页状态
+  await loadKeys(true)
 }
 
 const loadDatabases = async () => {
@@ -750,17 +800,47 @@ const loadDatabases = async () => {
   }
 }
 
-const loadKeys = async () => {
+const loadKeys = async (reset: boolean = true) => {
   if (!selectedServer.value) return
-  
+
   try {
     message.value = ''
-    keys.value = await redis.getKeys({
+
+    if (reset) {
+      // 重置状态，首次加载
+      keys.value = []
+      keysCursor.value = 0
+    }
+
+    // 模拟分页加载 - 每次加载100个
+    const pageSize = 100
+
+    // 模拟从后端获取当前批次的 keys
+    // 实际使用时，这里会调用后端分页 API
+    const allKeys = await redis.getKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0
     })
+
+    // 设置总数
+    keysTotal.value = allKeys.length
+
+    // 如果是首次加载，只取前100个
+    if (reset) {
+      keys.value = allKeys.slice(0, pageSize)
+      if (allKeys.length > pageSize) {
+        keysCursor.value = pageSize // 标记还有更多
+      } else {
+        keysCursor.value = 0 // 没有更多了
+      }
+    } else {
+      // 追加加载
+      keys.value = allKeys
+      keysCursor.value = 0
+    }
+
     selectedKey.value = ''
     keyValue.value = ''
     keyType.value = ''
@@ -768,6 +848,122 @@ const loadKeys = async () => {
     console.error('加载键失败:', error)
     messageType.value = 'error'
     message.value = `加载键失败: ${error.message || error}`
+  }
+}
+
+// 加载更多 - 每次加载100个
+const handleLoadMore = async () => {
+  if (!selectedServer.value || isLoadingMore.value) return
+
+  isLoadingMore.value = true
+  const startTime = Date.now()
+  try {
+    const pageSize = 100
+
+    // 获取所有 keys（实际应该用分页 API）
+    const allKeys = await redis.getKeys({
+      host: selectedServer.value.host,
+      port: selectedServer.value.port,
+      password: selectedServer.value.password,
+      db: selectedDb.value ?? 0
+    })
+
+    // 获取当前已加载的数量
+    const currentLength = keys.value.length
+    // 计算剩余数量
+    const remaining = allKeys.length - currentLength
+
+    if (remaining > 0) {
+      // 加载下一批（最多 pageSize 个）
+      const nextBatch = allKeys.slice(currentLength, currentLength + pageSize)
+      keys.value = [...keys.value, ...nextBatch]
+
+      // 更新游标
+      if (currentLength + pageSize < allKeys.length) {
+        keysCursor.value = currentLength + pageSize
+      } else {
+        keysCursor.value = 0 // 没有更多了
+      }
+
+      // 等待 DOM 更新后滚动到新内容
+      await nextTick()
+      const treeEl = document.querySelector('.key-list-content .el-scrollbar__wrap')
+      if (treeEl) {
+        const scrollTarget = treeEl.scrollHeight - treeEl.clientHeight - 50
+        treeEl.scrollTo({ top: Math.max(0, scrollTarget), behavior: 'smooth' })
+      }
+
+      // 数量文字短暂高亮
+      const countEl = document.querySelector('.count-divider')
+      if (countEl) {
+        countEl.classList.add('count-highlight')
+        setTimeout(() => countEl.classList.remove('count-highlight'), 600)
+      }
+    }
+
+    // 确保 loading 状态至少显示 300ms
+    const elapsed = Date.now() - startTime
+    if (elapsed < 300) {
+      await new Promise(resolve => setTimeout(resolve, 300 - elapsed))
+    }
+  } catch (error: any) {
+    console.error('加载更多失败:', error)
+    messageType.value = 'error'
+    message.value = `加载更多失败: ${error.message || error}`
+  } finally {
+    isLoadingMore.value = false
+  }
+}
+
+// 加载所有 keys，带真实的分批进度显示
+const handleLoadAll = async () => {
+  if (!selectedServer.value || isLoadingAll.value) return
+
+  isLoadingAll.value = true
+  try {
+    // 先获取所有 keys 用于计算总数
+    const allKeys = await redis.getKeys({
+      host: selectedServer.value.host,
+      port: selectedServer.value.port,
+      password: selectedServer.value.password,
+      db: selectedDb.value ?? 0
+    })
+
+    keysTotal.value = allKeys.length
+    const total = allKeys.length
+    const batchSize = 100 // 每批加载 100 个
+
+    // 如果总数较少，直接显示
+    if (total <= batchSize) {
+      keys.value = allKeys
+      keysCursor.value = 0
+      messageType.value = 'success'
+      message.value = `已加载全部 ${total} 个 keys`
+      return
+    }
+
+    // 分批逐步加载，营造真实进度感
+    keys.value = []
+    for (let i = 0; i < total; i += batchSize) {
+      const batch = allKeys.slice(i, i + batchSize)
+      keys.value = [...keys.value, ...batch]
+
+      // 等待 Vue 更新 DOM，确保进度条渲染
+      await nextTick()
+      // 额外等待，让 CSS transition 有时间播放
+      await new Promise(resolve => setTimeout(resolve, 80))
+    }
+
+    keysCursor.value = 0 // 没有更多了
+
+    messageType.value = 'success'
+    message.value = `已加载全部 ${total} 个 keys`
+  } catch (error: any) {
+    console.error('加载所有失败:', error)
+    messageType.value = 'error'
+    message.value = `加载所有失败: ${error.message || error}`
+  } finally {
+    isLoadingAll.value = false
   }
 }
 
@@ -821,21 +1017,28 @@ const compressJson = (value: string): string => {
 
 const searchKeys = async () => {
   if (!selectedServer.value) return
-  
+
   try {
     message.value = ''
     // 为搜索关键词添加通配符，实现模糊查询
-    const pattern = searchPattern.value 
-      ? `*${searchPattern.value}*` 
+    const pattern = searchPattern.value
+      ? `*${searchPattern.value}*`
       : '*'
-    
-    keys.value = await redis.searchKeys({
+
+    const result = await redis.searchKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0,
       pattern
     })
+
+    // 设置搜索结果
+    keys.value = result
+
+    // 搜索模式下重置分页状态
+    keysCursor.value = 0
+    keysTotal.value = result.length
   } catch (error: any) {
     console.error('搜索键失败:', error)
     messageType.value = 'error'
@@ -1989,4 +2192,79 @@ const currentServerTrashCount = computed(() => {
 .trash-toolbar { padding: 12px 15px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #e4e7ed; background-color: #ffffff; }
 .trash-list-content { flex: 1; overflow: auto; padding: 0; }
 
+/* ========== 分页加载样式 ========== */
+.key-list-footer {
+  padding: 8px 15px;
+  border-top: 1px solid #e4e7ed;
+  background-color: #f5f7fa;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: auto;
+  transition: all 0.3s ease;
+}
+
+.load-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 加载按钮统一样式：透明底灰字边框，hover 蓝底白字 */
+.load-btn {
+  background-color: transparent;
+  border-color: #dcdfe6;
+  color: #606266;
+}
+
+.load-btn:hover {
+  background-color: #1890ff;
+  border-color: #1890ff;
+  color: #ffffff;
+}
+
+.load-btn:disabled {
+  background-color: transparent;
+  border-color: #e4e7ed;
+  color: #a8abb2;
+}
+
+.count-divider {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1890ff;
+  white-space: nowrap;
+  transition: color 0.3s ease, transform 0.3s ease;
+}
+
+.count-divider.count-highlight {
+  color: #1890ff;
+  transform: scale(1.2);
+}
+
+.loading-all-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.loading-all-progress .el-progress {
+  width: 100%;
+}
+
+/* 进度条宽度平滑过渡动画 */
+.loading-all-progress :deep(.el-progress-bar__inner) {
+  transition: width 0.3s ease;
+}
+
+.loading-all-progress :deep(.el-progress-bar__outer) {
+  overflow: hidden;
+}
+
+.loading-text {
+  font-size: 12px;
+  color: #909399;
+}
 </style>
