@@ -17,6 +17,13 @@
       <el-table-column prop="host" label="服务器" width="180" />
       <el-table-column prop="port" label="端口" width="100" />
       <el-table-column prop="db" label="默认DB" width="100" />
+      <el-table-column label="只读" width="80" align="center">
+        <template #default="{ row }">
+          <el-tag :type="row.readonly ? 'warning' : 'info'" size="small">
+            {{ row.readonly ? '是' : '否' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="240" fixed="right">
         <template #default="{ row }">
           <div class="operation-buttons">
@@ -62,6 +69,10 @@
         <el-form-item label="默认DB">
           <el-input-number v-model="serverForm.db" :min="0" :max="15" />
         </el-form-item>
+        <el-form-item label="只读">
+          <el-switch v-model="serverForm.readonly" active-text="禁止删除" inactive-text="" />
+          <span class="readonly-hint">开启后，该服务器的 DB 和 Key 将无法删除</span>
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -95,6 +106,10 @@
         </el-form-item>
         <el-form-item label="默认DB">
           <el-input-number v-model="serverForm.db" :min="0" :max="15" />
+        </el-form-item>
+        <el-form-item label="只读">
+          <el-switch v-model="serverForm.readonly" active-text="禁止删除" inactive-text="" />
+          <span class="readonly-hint">开启后，该服务器的 DB 和 Key 将无法删除</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -161,7 +176,8 @@ const serverForm = ref({
   host: '',
   port: 6379,
   password: '',
-  db: 0
+  db: 0,
+  readonly: false
 })
 
 // 选中的服务器
@@ -189,7 +205,8 @@ const addServer = async () => {
       host: serverForm.value.host,
       port: serverForm.value.port,
       password: serverForm.value.password || undefined,
-      db: serverForm.value.db
+      db: serverForm.value.db,
+      readonly: serverForm.value.readonly
     })
     showAddDialog.value = false
     resetForm()
@@ -205,7 +222,8 @@ const editServer = (row: any) => {
     host: row.host,
     port: row.port,
     password: row.password || '',
-    db: row.db
+    db: row.db,
+    readonly: row.readonly || false
   }
   showEditDialog.value = true
 }
@@ -218,7 +236,8 @@ const updateServer = async () => {
       host: serverForm.value.host,
       port: serverForm.value.port,
       password: serverForm.value.password || undefined,
-      db: serverForm.value.db
+      db: serverForm.value.db,
+      readonly: serverForm.value.readonly
     })
     showEditDialog.value = false
   } catch (error) {
@@ -264,7 +283,8 @@ const resetForm = () => {
     host: '',
     port: 6379,
     password: '',
-    db: 0
+    db: 0,
+    readonly: false
   }
 }
 
@@ -538,5 +558,11 @@ onMounted(async () => {
 
 :deep(.el-input-number__wrapper:focus-within) {
   box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+.readonly-hint {
+  margin-left: 12px;
+  font-size: 12px;
+  color: #909399;
 }
 </style>

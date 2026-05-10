@@ -106,7 +106,7 @@ main.rs (注册所有命令)
 | 状态栏 | 当前路径导航 |
 | 搜索栏 | 刷新 + 搜索框 + 搜索按钮 + 添加按钮(+) |
 | 键列表 | el-tree 展示，分页加载（每次 100 个），支持排序 |
-| 多选面板 | 全选/取消/移入废键箱（向上展开） |
+| 多选面板 | 全选/取消/删除废键箱（向上展开） |
 | 值展示区 | 类型标签 + 编辑器 + 删除/修改按钮 |
 | 废键箱视图 | el-table 展示，恢复/永久删除 |
 | 对话框 | 添加键、修改键、服务器配置、新增DB、删除DB、导出、清空 |
@@ -125,8 +125,8 @@ main.rs (注册所有命令)
 | `handleSortCommand()` | 排序键列表（升序/降序/取消） |
 | `addKey()` | 添加新键 |
 | `updateKey()` | 修改键值 |
-| `deleteKey()` | 删除键（移入废键箱） |
-| `batchMoveToTrash()` | 批量移入废键箱 |
+| `deleteKey()` | 删除键（删除废键箱） |
+| `batchMoveToTrash()` | 批量删除废键箱 |
 | `exportData()` / `importData()` | 导入导出 JSON |
 | `toggleMultiSelectMode()` | 切换多选模式 |
 | `selectAllLoaded()` | 全选当前已加载 |
@@ -220,8 +220,8 @@ Redis 操作状态管理。
 
 | Action | 后端命令 | 功能 |
 |--------|---------|------|
-| `moveToTrash()` | `move_to_trash` | 单个移入废键箱 |
-| `batchMoveToTrash()` | `batch_move_to_trash` | 批量移入废键箱 |
+| `moveToTrash()` | `move_to_trash` | 单个删除废键箱 |
+| `batchMoveToTrash()` | `batch_move_to_trash` | 批量删除废键箱 |
 | `getTrashItems()` | `get_trash_items` | 获取废键箱列表 |
 | `restoreFromTrash()` | `restore_from_trash` | 恢复单个键 |
 | `batchRestoreFromTrash()` | `batch_restore_from_trash` | 批量恢复键 |
@@ -290,7 +290,7 @@ Redis 操作命令，10 个函数。
 | 函数 | 功能 |
 |------|------|
 | `move_to_trash` | 保存键值到废键箱，从 Redis 删除（7 天过期） |
-| `batch_move_to_trash` | 批量移入废键箱 |
+| `batch_move_to_trash` | 批量删除废键箱 |
 | `get_trash_items` | 获取指定服务器的废键箱列表（自动清理过期项） |
 | `restore_from_trash` | 恢复单个键到 Redis |
 | `batch_restore_from_trash` | 批量恢复键 |
@@ -399,8 +399,8 @@ Redis 操作命令，10 个函数。
 
 | 命令 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
-| `move_to_trash` | MoveToTrashRequest | () | 移入废键箱 |
-| `batch_move_to_trash` | BatchMoveToTrashRequest | () | 批量移入 |
+| `move_to_trash` | MoveToTrashRequest | () | 删除废键箱 |
+| `batch_move_to_trash` | BatchMoveToTrashRequest | () | 批量删除 |
 | `get_trash_items` | { host, port } | Vec\<TrashItemResponse\> | 获取列表 |
 | `restore_from_trash` | { trash_id: String } | () | 恢复单个 |
 | `batch_restore_from_trash` | { trash_ids: Vec\<String\> } | () | 批量恢复 |

@@ -41,7 +41,7 @@ export const trashStore = defineStore('trash', {
       try {
         return await invoke<boolean>('move_to_trash', { req: params })
       } catch (error) {
-        console.error('移入废键箱失败:', error)
+        console.error('删除废键箱失败:', error)
         throw error
       }
     },
@@ -50,7 +50,7 @@ export const trashStore = defineStore('trash', {
       try {
         return await invoke<number>('batch_move_to_trash', { req: params })
       } catch (error) {
-        console.error('批量移入废键箱失败:', error)
+        console.error('批量删除废键箱失败:', error)
         throw error
       }
     },

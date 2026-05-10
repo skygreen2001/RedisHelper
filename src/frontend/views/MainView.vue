@@ -53,8 +53,9 @@
               <el-dropdown-item divided command="add">
                 <el-icon><Plus /></el-icon> 新增DB
               </el-dropdown-item>
-              <el-dropdown-item command="delete">
+              <el-dropdown-item divided command="delete" :disabled="isCurrentServerReadonly">
                 <el-icon><Delete /></el-icon> 删除DB
+                <span v-if="isCurrentServerReadonly" class="menu-disabled-hint">（只读模式）</span>
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -71,8 +72,9 @@
               <el-dropdown-item command="export">
                 <el-icon><Download /></el-icon> 导出
               </el-dropdown-item>
-              <el-dropdown-item command="flush" divided>
+              <el-dropdown-item command="flush" divided :disabled="isCurrentServerReadonly">
                 <el-icon><Delete /></el-icon> 清空
+                <span v-if="isCurrentServerReadonly" class="menu-disabled-hint">（只读模式）</span>
               </el-dropdown-item>
               <el-dropdown-item command="generateTestData">
                 <el-icon><Plus /></el-icon> 生成测试数据
@@ -218,10 +220,10 @@
                   type="danger"
                   size="small"
                   @click="batchMoveToTrash"
-                  :disabled="selectedKeys.length === 0"
+                  :disabled="selectedKeys.length === 0 || isCurrentServerReadonly"
                 >
                   <el-icon><Delete /></el-icon>
-                  移入 ({{ selectedKeys.length }})
+                  删除 ({{ selectedKeys.length }})
                 </el-button>
               </div>
               <div class="multi-select-panel-hint">
@@ -283,7 +285,7 @@
             />
           </div>
           <div class="value-actions">
-            <el-button size="small" type="danger" @click="deleteKey" class="action-btn delete-btn">
+            <el-button size="small" type="danger" @click="deleteKey" class="action-btn delete-btn" :disabled="isCurrentServerReadonly">
               <el-icon><Delete /></el-icon>
               <span>删除</span>
             </el-button>
@@ -688,7 +690,12 @@ const handleDbCommand = async (command: any) => {
     // 新增DB逻辑
     showAddDbDialog.value = true
   } else if (command === 'delete') {
-    // 删除DB逻辑
+    // 删除DB逻辑 - 只读模式下禁止
+    if (isCurrentServerReadonly.value) {
+      messageType.value = 'error'
+      message.value = '当前服务器为只读模式，无法删除DB'
+      return
+    }
     showDeleteDbDialog.value = true
   } else if (command === 'trash') {
     isTrashView.value = true
@@ -722,6 +729,11 @@ const handleActionCommand = (command: string) => {
       exportData()
       break
     case 'flush':
+      if (isCurrentServerReadonly.value) {
+        messageType.value = 'error'
+        message.value = '当前服务器为只读模式，无法清空数据库'
+        break
+      }
       showFlushDialog.value = true
       break
     case 'generateTestData':
@@ -829,6 +841,7 @@ const editKeyForm = ref({
 
 // 计算属性
 const servers = computed(() => server.servers)
+const isCurrentServerReadonly = computed(() => selectedServer.value?.readonly === true)
 const keyTree = computed(() => {
   return sortedKeys.value.map(key => ({
     id: key,
@@ -1279,8 +1292,13 @@ const updateKey = async () => {
 
 const deleteKey = async () => {
   if (!selectedServer.value || !selectedKey.value) return
+  if (isCurrentServerReadonly.value) {
+    messageType.value = 'error'
+    message.value = '当前服务器为只读模式，无法删除Key'
+    return
+  }
   try {
-    await ElMessageBox.confirm('确定要删除该键吗？删除后将移入废键箱，7天后自动清除。', '确认删除', {
+    await ElMessageBox.confirm('确定要删除该键吗？删除后将删除废键箱，7天后自动清除。', '确认删除', {
       confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning',
     })
     message.value = ''
@@ -1296,7 +1314,7 @@ const deleteKey = async () => {
     await loadDatabases()
     await loadTrashItems()
     messageType.value = 'success'
-    message.value = '已移入废键箱，7天后自动清除'
+    message.value = '已删除废键箱，7天后自动清除'
   } catch (error: any) {
     if (error === 'cancel' || error?.toString?.().includes('cancel')) return
     messageType.value = 'error'
@@ -1601,10 +1619,17 @@ const importData = async () => {
 // 服务器配置页面关闭
 const closeServerConfig = async () => {
   showServerConfig.value = false
-  // 重新加载服务器列表
+  // 重新加载服务器列表，并同步更新当前选中的服务器（使 readonly 等配置实时生效）
   try {
     message.value = ''
     await server.loadServers()
+    // 用 store 中最新的数据刷新 selectedServer
+    if (selectedServer.value) {
+      const updated = servers.value.find((s: any) => s.id === selectedServer.value.id)
+      if (updated) {
+        selectedServer.value = updated
+      }
+    }
   } catch (error: any) {
     console.error('加载服务器失败:', error)
     messageType.value = 'error'
@@ -1648,7 +1673,12 @@ const addDb = async () => {
 // 删除DB
 const deleteDb = async () => {
   if (!selectedServer.value || selectedDbsForDelete.value.length === 0) return
-  
+  if (isCurrentServerReadonly.value) {
+    messageType.value = 'error'
+    message.value = '当前服务器为只读模式，无法删除DB'
+    return
+  }
+
   try {
     message.value = ''
     
@@ -1719,13 +1749,18 @@ const clearSelection = () => {
   }
 }
 
-// 批量移入废键箱
+// 批量删除废键箱
 const batchMoveToTrash = async () => {
   if (selectedKeys.value.length === 0 || !selectedServer.value) return
+  if (isCurrentServerReadonly.value) {
+    messageType.value = 'error'
+    message.value = '当前服务器为只读模式，无法删除Key'
+    return
+  }
 
   try {
     await ElMessageBox.confirm(
-      `确定要将选中的 ${selectedKeys.value.length} 个键移入废键箱吗？`,
+      `确定要将选中的 ${selectedKeys.value.length} 个键删除废键箱吗？`,
       '批量删除确认',
       {
         confirmButtonText: '确认',
@@ -1752,7 +1787,7 @@ const batchMoveToTrash = async () => {
     await loadTrashItems()
 
     messageType.value = 'success'
-    message.value = `已将 ${count} 个键移入废键箱，7天后自动清除`
+    message.value = `已将 ${count} 个键删除废键箱，7天后自动清除`
   } catch (error: any) {
     if (error === 'cancel') return
     messageType.value = 'error'
@@ -2644,5 +2679,12 @@ const currentServerTrashCount = computed(() => {
 /* 多选模式下的树节点样式调整 */
 .key-list :deep(.el-tree.show-checkbox .el-tree-node__content) {
   padding-left: 8px;
+}
+
+/* 只读模式禁用菜单提示 */
+.menu-disabled-hint {
+  font-size: 12px;
+  color: #c0c4cc;
+  margin-left: 4px;
 }
 </style>

@@ -8,6 +8,7 @@ interface Server {
   port: number
   password?: string
   db: number
+  readonly: boolean
   created: string
   updated: string
 }
@@ -68,6 +69,7 @@ export const serverStore = defineStore('server', {
       port: number
       password?: string
       db: number
+      readonly?: boolean
     }): Promise<Server[]> {
       try {
         this.servers = await invoke<Server[]>('add_server', {
@@ -87,6 +89,7 @@ export const serverStore = defineStore('server', {
       port: number
       password?: string
       db: number
+      readonly?: boolean
     }): Promise<Server[]> {
       try {
         this.servers = await invoke<Server[]>('edit_server', {

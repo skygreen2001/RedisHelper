@@ -11,6 +11,8 @@ pub struct ServerConfig {
     pub port: u16,
     pub password: Option<String>,
     pub db: u8,
+    #[serde(default)]
+    pub readonly: bool,
     pub created: String,
     pub updated: String,
 }

@@ -10,6 +10,8 @@ pub struct ServerRequest {
     pub port: u16,
     pub password: Option<String>,
     pub db: Option<u8>,
+    #[serde(default)]
+    pub readonly: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,6 +37,7 @@ pub fn add_server(config: ServerRequest) -> Result<Vec<ServerConfig>, String> {
         port: config.port,
         password: config.password,
         db: config.db.unwrap_or(0),
+        readonly: config.readonly,
         created: chrono::Local::now().to_string(),
         updated: chrono::Local::now().to_string(),
     }).map_err(|e| e.to_string())?;
@@ -52,6 +55,7 @@ pub fn edit_server(config: ServerRequest) -> Result<Vec<ServerConfig>, String> {
         port: config.port,
         password: config.password,
         db: config.db.unwrap_or(0),
+        readonly: config.readonly,
         created: "".to_string(), // 保持原有创建时间
         updated: chrono::Local::now().to_string(),
     }).map_err(|e| e.to_string())?;
