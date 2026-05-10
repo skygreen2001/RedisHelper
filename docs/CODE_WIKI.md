@@ -1,289 +1,479 @@
-# Online Redis Manager 代码 Wiki
+# Redis 小助手 — 代码 Wiki
+
+> 本文档为当前版本（Tauri 2.0 + Vue 3 + Rust）的代码结构说明。
+> 旧版 PHP 版本文档见 [CODE_WIKI.old.md](CODE_WIKI.old.md)（如有）。
+
+---
 
 ## 1. 项目概述
 
-Online Redis Manager 是一个符合中国开发者思维方式的在线Redis管理工具框架，设计初衷是快捷、简单、实用。
+| 属性 | 值 |
+|------|-----|
+| 项目名称 | Redis小助手 (redis-helper) |
+| 版本 | 1.1.0 |
+| 技术栈 | Tauri 2.0 + Vue 3 + TypeScript + Pinia + Element Plus + Rust |
+| 定位 | 跨平台桌面端 Redis 管理工具 |
+| 前后端通信 | Tauri Commands（invoke），共 20 个命令 |
 
-- **前端技术栈**：Vuejs、iView框架
-- **后端技术栈**：PHP、PhpRedis扩展、PhpSpreadsheet框架
-- **核心依赖**：betterlife框架、betterlife.front框架
+---
 
-## 2. 项目架构
-
-### 2.1 目录结构
+## 2. 项目目录结构
 
 ```
-├── api/             # AJAX请求服务端支持
-│   └── common/      # 通用API接口
-├── core/            # 框架核心支持文件
-│   ├── cache/       # 缓存相关实现
-│   ├── config/      # 配置文件
-│   ├── exception/   # 异常处理
-│   ├── include/     # 常用函数库
-│   ├── lang/        # 语言文件
-│   ├── log/         # 日志处理
-│   ├── main/        # 核心应用
-│   └── util/        # 工具类
-├── docs/            # 设计文档
-├── help/            # 帮助文档
-├── install/         # 安装目录
-├── www/             # 前端页面
-├── index.php        # 项目入口
-├── init.php         # 初始化文件
-└── composer.json    # 依赖管理
+redis-helper/
+├── src/frontend/                    # 前端代码
+│   ├── main.ts                      # 应用入口
+│   ├── App.vue                      # 根组件
+│   ├── views/                       # 页面视图
+│   │   ├── MainView.vue             # 主界面（核心，约 1800 行）
+│   │   └── ServerConfigView.vue     # 服务器配置管理
+│   └── stores/                      # Pinia 状态管理
+│       ├── redisStore.ts            # Redis 操作
+│       ├── serverStore.ts           # 服务器配置
+│       └── trashStore.ts            # 废键箱
+├── src-tauri/                       # Rust 后端代码
+│   ├── src/
+│   │   ├── main.rs                  # Rust 入口，注册 20 个 Tauri 命令
+│   │   ├── commands/                # 命令层（Tauri Command）
+│   │   │   ├── mod.rs               # 模块声明
+│   │   │   ├── server.rs            # 服务器配置命令（5 个）
+│   │   │   ├── redis.rs             # Redis 操作命令（10 个）
+│   │   │   ├── export.rs            # 导入导出命令（2 个）
+│   │   │   └── trash.rs             # 废键箱命令（7 个）
+│   │   ├── redis/                   # Redis 连接模块
+│   │   │   ├── mod.rs               # 模块声明
+│   │   │   └── connection.rs        # Redis 连接封装
+│   │   └── storage/                 # 本地存储模块
+│   │       ├── mod.rs               # 模块声明
+│   │       ├── config.rs            # 服务器配置持久化
+│   │       └── trash.rs             # 废键箱数据持久化
+│   ├── Cargo.toml                   # Rust 依赖
+│   └── tauri.conf.json              # Tauri 配置
+├── docs/                            # 设计文档
+├── index.html                       # HTML 模板
+├── package.json                     # 前端依赖
+├── vite.config.ts                   # Vite 构建配置
+└── README.md                        # 项目说明
 ```
 
-### 2.2 核心模块关系
+---
 
-```mermaid
-flowchart TD
-    A[前端页面 www/index.html] -->|AJAX请求| B[API接口 api/common/redis.php]
-    B -->|调用| C[Cache_Redis核心类]
-    C -->|连接| D[Redis服务器]
-    C -->|读取配置| E[Config_Redis配置类]
-    B -->|文件操作| F[工具类 Util*]
+## 3. 模块依赖关系
+
+```
+index.html
+  └── main.ts
+        ├── vue / pinia / element-plus
+        └── App.vue
+              └── MainView.vue
+                    ├── serverStore ──invoke──> commands::server ──> storage::config
+                    │                                        └──> redis::connection
+                    ├── redisStore  ──invoke──> commands::redis  ──> redis::connection
+                    │                         ──invoke──> commands::export ──> redis::connection
+                    ├── trashStore  ──invoke──> commands::trash  ──> storage::trash
+                    │                                        └──> redis::connection
+                    └── ServerConfigView
+                          └── serverStore (同上)
 ```
 
-## 3. 核心模块与功能
+**后端模块关系**：
 
-### 3.1 缓存模块 (Cache)
+```
+main.rs (注册所有命令)
+  ├── commands::server   ──> storage::config (ConfigManager)
+  │                       ──> redis::connection (RedisConnection)
+  ├── commands::redis    ──> redis::connection
+  ├── commands::export   ──> redis::connection
+  └── commands::trash    ──> storage::trash (TrashManager)
+                          ──> redis::connection
+```
 
-#### Cache_Redis 类
+---
 
-**路径**：[core/cache/redis/Cache_Redis.php](file:///Library/WebServer/Documents/redis/core/cache/redis/Cache_Redis.php)
+## 4. 前端模块详解
 
-**主要功能**：
-- Redis服务器连接与管理
-- 键值对的增删改查
-- 支持多种Redis数据类型（String、Set、List、ZSet、Hash）
-- 数据导入导出
+### 4.1 视图层
+
+#### MainView.vue
+
+主界面视图，是项目最核心的前端文件（约 1800 行）。
+
+**功能模块**：
+
+| 模块 | 说明 |
+|------|------|
+| 菜单栏 | 连接/DB/更多/多选 |
+| 状态栏 | 当前路径导航 |
+| 搜索栏 | 刷新 + 搜索框 + 搜索按钮 + 添加按钮(+) |
+| 键列表 | el-tree 展示，分页加载（每次 100 个） |
+| 多选面板 | 全选/取消/移入废键箱（向上展开） |
+| 值展示区 | 类型标签 + 编辑器 + 删除/修改按钮 |
+| 废键箱视图 | el-table 展示，恢复/永久删除 |
+| 对话框 | 添加键、修改键、服务器配置、新增DB、删除DB、导出、清空 |
 
 **核心方法**：
 
-| 方法名 | 功能描述 | 参数 | 返回值 |
-|--------|----------|------|--------|
-| `__construct` | 初始化Redis连接 | host, port, password | 无 |
-| `select` | 选择指定数据库 | index | 无 |
-| `keys` | 获取所有键值 | pattern | 键值数组 |
-| `size` | 获取数据库大小 | 无 | 键数量 |
-| `dbInfos` | 获取所有数据库信息 | 无 | 数据库信息数组 |
-| `getKeyType` | 获取键类型 | key | 类型代码 |
-| `save` | 保存数据（仅当键不存在） | key, value, type, expired | 无 |
-| `set` | 保存数据（覆盖已有键） | key, value, type, expired | 无 |
-| `update` | 更新数据 | key, value, type, expired | 无 |
-| `delete` | 删除键值 | key | 无 |
-| `get` | 获取键值 | key | 键值 |
-| `gets` | 批量获取键值 | keyArr | 键值数组 |
-| `clear` | 清除当前数据库 | 无 | 无 |
-| `clearAll` | 清除所有数据库 | 无 | 无 |
+| 方法 | 功能 |
+|------|------|
+| `handleServerChange()` | 切换服务器，退出多选，加载数据库 |
+| `handleDbChange()` | 切换 DB，退出多选，重置分页 |
+| `loadKeys(reset?)` | 加载键列表（前端模拟分页） |
+| `handleLoadMore()` | 加载更多（追加 100 个） |
+| `handleLoadAll()` | 加载所有（分批，显示进度条） |
+| `loadKeyValue(key)` | 加载键值（JSON 自动格式化） |
+| `searchKeys()` | 模糊搜索（`*keyword*`） |
+| `addKey()` | 添加新键 |
+| `updateKey()` | 修改键值 |
+| `deleteKey()` | 删除键（移入废键箱） |
+| `batchMoveToTrash()` | 批量移入废键箱 |
+| `exportData()` / `importData()` | 导入导出 JSON |
+| `toggleMultiSelectMode()` | 切换多选模式 |
+| `selectAllLoaded()` | 全选当前已加载 |
+| `selectAllKeys()` | 全选所有 |
+| `clearSelection()` | 取消选择 |
+| `handleKeyDown(event)` | 快捷键处理 |
 
-### 3.2 配置模块 (Config)
+**快捷键**：
 
-#### Config_Redis 类
+| 快捷键 | 功能 |
+|--------|------|
+| Ctrl+A | 全选当前已加载 |
+| Ctrl+Shift+A | 全选所有 |
+| Esc | 退出多选模式 |
 
-**路径**：[core/config/config/cache/Config_Redis.php](file:///Library/WebServer/Documents/redis/core/config/config/cache/Config_Redis.php)
+#### ServerConfigView.vue
 
-**主要功能**：
-- Redis服务器配置管理
+服务器配置管理页面，嵌入 MainView 的对话框中使用。
 
-**配置参数**：
+**功能**：服务器列表表格、添加/编辑/删除服务器、测试连接。
 
-| 参数名 | 类型 | 默认值 | 描述 |
-|--------|------|--------|------|
-| `$host` | string | "redis" | Redis服务器地址 |
-| `$port` | int | 6379 | Redis服务器端口 |
-| `$password` | string | "orm" | Redis服务器密码 |
-| `$is_persistent` | bool | false | 是否持久化连接 |
-| `$prefix_key` | string | "" | 键前缀 |
+### 4.2 状态管理层
 
-### 3.3 API接口模块
+#### redisStore.ts
 
-#### redis.php
+Redis 操作状态管理。
 
-**路径**：[api/common/redis.php](file:///Library/WebServer/Documents/redis/api/common/redis.php)
+**类型定义**：
 
-**主要功能**：
-- 处理前端AJAX请求
-- 提供Redis操作的API接口
-- 服务器配置管理
-- 数据导入导出
+| 接口 | 字段 |
+|------|------|
+| `ConnectRequest` | host, port, password?, db |
+| `KeyRequest` | host, port, password?, db, key |
+| `KeyValueRequest` | host, port, password?, db, key, value, key_type |
+| `SearchRequest` | host, port, password?, db, pattern |
+| `ExportRequest` | host, port, password?, db, file_path |
+| `KeyValueResponse` | key, value, key_type |
 
-**API端点**：
+**Actions**：
 
-| 步骤(step) | 功能描述 | 参数 | 返回值 |
-|------------|----------|------|--------|
-| 100 | 查询Redis服务器设置列表 | 无 | 服务器列表 |
-| 101 | 添加DB | server, port, password | 数据库列表 |
-| 102 | 删除DB | server, port, password, db | 数据库列表 |
-| 1 | 查询指定服务器所有的DB | server, port, password | 数据库列表 |
-| 2 | 查询指定DB所有的keys | server, port, password, db | 键值列表 |
-| 3 | 查询指定key的value | server, port, password, db, key | 键值信息 |
-| 4 | 修改指定key的value | server, port, password, db, key, val, valType | 修改后的键值 |
-| 5 | 模糊查询指定关键词的所有key | server, port, password, db, queryKey | 键值列表 |
-| 6 | 新增key和value | server, port, password, db, addNewKey, addNewValue, addNewType | 键值列表 |
-| 7 | 删除指定key | server, port, password, db, key | 成功状态 |
-| 8 | 导出数据 | server, port, password, db, queryKey | 导出文件URL |
-| 9 | 导入数据 | server, port, password, db, ufile | 键值列表 |
+| Action | 后端命令 | 功能 |
+|--------|---------|------|
+| `connect()` | `connect` | 连接 Redis |
+| `getDatabases()` | `get_databases` | 获取数据库列表 |
+| `getKeys()` | `get_keys` | 获取所有键 |
+| `getKeyValue()` | `get_key_value` | 获取键值 |
+| `setKeyValue()` | `set_key_value` | 设置键值 |
+| `deleteKey()` | `delete_key` | 删除键 |
+| `searchKeys()` | `search_keys` | 搜索键 |
+| `exportData()` | `export_data` | 导出数据 |
+| `importData()` | `import_data` | 导入数据 |
+| `createDatabase()` | `create_database` | 创建数据库 |
+| `deleteDatabase()` | `delete_database` | 删除数据库 |
+| `flushDatabase()` | `flush_database` | 清空数据库 |
 
-## 4. 项目运行与部署
+#### serverStore.ts
 
-### 4.1 运行环境要求
+服务器配置状态管理。
 
-- PHP 5.3.0 或更高版本
-- PhpRedis 扩展
-- Redis 服务器
-- Web 服务器（Apache/Nginx等）
+**类型定义**：
 
-### 4.2 安装步骤
+| 接口 | 字段 |
+|------|------|
+| `Server` | id, name, host, port, password?, db, created, updated |
+| `TestConnectionRequest` | host, port, password? |
+| `TestConnectionResponse` | success, message |
 
-1. **安装运行环境**：
-   - 可选择 WAMP/LAMP/MAMP/XAMPP 等集成环境
-   - 或使用宝塔、PhpStudy 等工具
+**Actions**：
 
-2. **安装 PhpRedis 扩展**：
-   - 参考 [install/README.md](file:///Library/WebServer/Documents/redis/install/README.md)
+| Action | 后端命令 | 功能 |
+|--------|---------|------|
+| `loadServers()` | `get_servers` | 加载服务器列表 |
+| `addServer()` | `add_server` | 添加服务器 |
+| `editServer()` | `edit_server` | 编辑服务器 |
+| `deleteServer()` | `delete_server` | 删除服务器 |
+| `testConnection()` | `test_connection` | 测试连接 |
 
-3. **安装依赖**：
-   ```bash
-   composer install
-   ```
+#### trashStore.ts
 
-4. **设置目录权限**：
-   ```bash
-   sudo mkdir log/ upload/
-   sudo chmod -R 0777 log/ upload/
-   ```
+废键箱状态管理。
 
-5. **访问应用**：
-   - 浏览器打开：http://localhost/www/index.html
+**类型定义**：
 
-### 4.3 服务器配置
+| 接口 | 字段 |
+|------|------|
+| `MoveToTrashRequest` | host, port, password?, db, key |
+| `BatchMoveToTrashRequest` | host, port, password?, db, keys[] |
+| `TrashItemResponse` | id, key, value, key_type, host, port, db, deleted_at, expires_at, is_expired |
 
-- **默认配置**：
-  - 服务器地址：redis
-  - 端口：6379
-  - 密码：orm
+**Actions**：
 
-- **配置持久化**：
-  - 在 `www/js/main.js` 中配置 `isConfigLocal`：
-    - `isConfigLocal: true`：配置存储在本地浏览器
-    - `isConfigLocal: false`：配置存储在服务器
+| Action | 后端命令 | 功能 |
+|--------|---------|------|
+| `moveToTrash()` | `move_to_trash` | 单个移入废键箱 |
+| `batchMoveToTrash()` | `batch_move_to_trash` | 批量移入废键箱 |
+| `getTrashItems()` | `get_trash_items` | 获取废键箱列表 |
+| `restoreFromTrash()` | `restore_from_trash` | 恢复单个键 |
+| `batchRestoreFromTrash()` | `batch_restore_from_trash` | 批量恢复键 |
+| `permanentDelete()` | `permanent_delete_trash` | 永久删除 |
+| `clearExpired()` | `clear_expired_trash` | 清理过期项 |
 
-## 5. 核心流程
+---
 
-### 5.1 连接Redis服务器流程
+## 5. 后端模块详解
 
-```mermaid
-flowchart TD
-    A[前端页面] -->|选择服务器| B[API接口]
-    B -->|创建连接| C[Cache_Redis实例]
-    C -->|读取配置| D[Config_Redis]
-    C -->|建立连接| E[Redis服务器]
-    E -->|返回连接状态| C
-    C -->|返回结果| B
-    B -->|返回数据| A
-```
+### 5.1 入口 (main.rs)
 
-### 5.2 键值操作流程
+注册 Tauri 插件和所有命令（共 20 个）。
 
-```mermaid
-flowchart TD
-    A[前端页面] -->|操作请求| B[API接口]
-    B -->|验证参数| C[Cache_Redis实例]
-    C -->|执行操作| D[Redis服务器]
-    D -->|返回结果| C
-    C -->|处理结果| B
-    B -->|返回数据| A
-```
+| 分类 | 命令数量 | 命令列表 |
+|------|---------|---------|
+| 服务器管理 | 5 | add_server, edit_server, delete_server, get_servers, test_connection |
+| Redis 操作 | 10 | connect, get_databases, get_keys, get_key_value, set_key_value, delete_key, search_keys, create_database, delete_database, flush_database |
+| 导入导出 | 2 | export_data, import_data |
+| 废键箱 | 7 | move_to_trash, batch_move_to_trash, get_trash_items, restore_from_trash, batch_restore_from_trash, permanent_delete_trash, clear_expired_trash |
 
-## 6. 依赖关系
+### 5.2 命令层 (commands/)
 
-### 6.1 核心依赖
+#### commands/redis.rs
 
-| 依赖 | 版本 | 用途 | 来源 |
-|------|------|------|------|
-| PHP | >=5.3.0 | 运行环境 | [composer.json](file:///Library/WebServer/Documents/redis/composer.json) |
-| PhpSpreadsheet | >=1.16.0 | 数据导入导出 | [composer.json](file:///Library/WebServer/Documents/redis/composer.json) |
-| PhpRedis | - | Redis操作扩展 | 外部安装 |
-| Vuejs | - | 前端框架 | 前端依赖 |
-| iView | - | UI组件库 | 前端依赖 |
+Redis 操作命令，10 个函数。
 
-### 6.2 内部依赖
+| 函数 | 功能 | 参数 |
+|------|------|------|
+| `connect` | 创建连接并 ping 测试 | host, port, password?, db |
+| `get_databases` | 获取所有数据库及 key 数量 | host, port, password? |
+| `get_keys` | 获取当前 DB 所有键 | host, port, password?, db |
+| `get_key_value` | 获取键值和类型 | host, port, password?, db, key |
+| `set_key_value` | 设置键值 | host, port, password?, db, key, value, key_type |
+| `delete_key` | 删除键 | host, port, password?, db, key |
+| `search_keys` | 按模式搜索键 | host, port, password?, db, pattern |
+| `create_database` | 创建/切换 DB | host, port, password?, db |
+| `delete_database` | 清空指定 DB | host, port, password?, db |
+| `flush_database` | 清空当前 DB | host, port, password?, db |
 
-| 模块 | 依赖模块 | 用途 |
-|------|----------|------|
-| Cache_Redis | Config_Redis | 读取Redis配置 |
-| Cache_Redis | UtilArray | 数组操作 |
-| api/common/redis.php | Cache_Redis | Redis操作 |
-| api/common/redis.php | UtilExcel | 数据导入导出 |
-| api/common/redis.php | UtilFileSystem | 文件操作 |
+#### commands/server.rs
 
-## 7. 配置与部署
+服务器配置管理命令，5 个函数。
 
-### 7.1 配置文件
+| 函数 | 功能 |
+|------|------|
+| `add_server` | 添加服务器配置（检查 ID 唯一性） |
+| `edit_server` | 编辑服务器配置（保留原创建时间） |
+| `delete_server` | 按 ID 删除服务器 |
+| `get_servers` | 获取所有服务器配置 |
+| `test_connection` | 测试 Redis 连接 |
 
-- **Redis配置**：[core/config/config/cache/Config_Redis.php](file:///Library/WebServer/Documents/redis/core/config/config/cache/Config_Redis.php)
-- **服务器配置**：存储在 `upload/redis/config/redis.json`
+#### commands/export.rs
 
-### 7.2 部署方式
+导入导出命令，2 个函数。
 
-1. **本地部署**：
-   - 使用集成环境如 WAMP/LAMP/MAMP/XAMPP
-   - 或使用 `php -S localhost:8000` 启动本地服务器
+| 函数 | 功能 |
+|------|------|
+| `export_data` | 导出当前 DB 所有键值为 JSON 文件（格式：`[{key, value, type}]`） |
+| `import_data` | 从 JSON 文件导入键值到当前 DB |
 
-2. **生产部署**：
-   - 配置 Web 服务器（Apache/Nginx）
-   - 确保 PhpRedis 扩展已安装
-   - 设置正确的目录权限
+#### commands/trash.rs
 
-## 8. 监控与维护
+废键箱命令，7 个函数。
 
-### 8.1 日志管理
+| 函数 | 功能 |
+|------|------|
+| `move_to_trash` | 保存键值到废键箱，从 Redis 删除（7 天过期） |
+| `batch_move_to_trash` | 批量移入废键箱 |
+| `get_trash_items` | 获取指定服务器的废键箱列表（自动清理过期项） |
+| `restore_from_trash` | 恢复单个键到 Redis |
+| `batch_restore_from_trash` | 批量恢复键 |
+| `permanent_delete_trash` | 永久删除废键箱项 |
+| `clear_expired_trash` | 清理所有过期废键箱项 |
 
-- 日志文件存储在 `log/` 目录
-- 每天生成一个调试测试日志文件
+### 5.3 Redis 连接模块 (redis/connection.rs)
 
-### 8.2 常见问题
+底层 Redis 操作封装，结构体 `RedisConnection`。
 
-1. **PhpRedis 扩展未安装**：
-   - 参考 [install/README.md](file:///Library/WebServer/Documents/redis/install/README.md) 安装
+| 方法 | 功能 |
+|------|------|
+| `new(host, port, password?)` | 创建连接（支持密码认证） |
+| `select(db)` | 切换数据库 |
+| `ping()` | 测试连接 |
+| `get_databases()` | 遍历 DB 0-15，返回有 key 的数据库 |
+| `get_keys()` | 获取当前 DB 所有键（`KEYS *`） |
+| `get_key_value(key)` | 获取键值（支持 5 种类型） |
+| `set_key_value(key, value, key_type)` | 设置键值（list/set/zset/hash 使用 JSON 序列化） |
+| `delete_key(key)` | 删除单个键 |
+| `delete_keys(keys[])` | 批量删除键 |
+| `search_keys(pattern)` | 按模式搜索键 |
+| `flushdb()` | 清空当前数据库 |
 
-2. **Redis 连接失败**：
-   - 检查 Redis 服务器是否运行
-   - 检查配置的服务器地址、端口和密码是否正确
-   - 检查 Redis 服务器是否允许远程连接
+**数据类型处理**：
 
-3. **目录权限问题**：
-   - 确保 `log/` 和 `upload/` 目录有写权限
+| 类型 | 存储方式 | 读取方式 |
+|------|----------|----------|
+| string | 原值 | GET |
+| list | JSON 序列化 | LRANGE + JSON 反序列化 |
+| set | JSON 序列化 | SMEMBERS + JSON 反序列化 |
+| zset | JSON 序列化 | ZRANGE + JSON 反序列化 |
+| hash | JSON 序列化 | HGETALL + JSON 反序列化 |
 
-## 9. 开发与扩展
+### 5.4 存储模块 (storage/)
 
-### 9.1 开发工具
+#### storage/config.rs
 
-- [Visual Studio Code](https://code.visualstudio.com/)
-- [Atom](https://atom.io)
-- [Sublime](http://www.sublimetext.com)
+服务器配置持久化。
 
-### 9.2 扩展建议
+| 结构体 | 字段 |
+|--------|------|
+| `ServerConfig` | id, name, host, port, password?, db, created, updated |
+| `Config` | servers: Vec\<ServerConfig\> |
+| `ConfigManager` | config, config_path |
 
-1. **添加更多Redis命令支持**：
-   - 扩展 Cache_Redis 类，添加更多 Redis 命令的封装
+| 属性 | 值 |
+|------|-----|
+| 存储路径 | `$HOME/.redis-helper/config.json` |
+| 管理器方法 | new, save, add_server, edit_server, delete_server, get_servers |
 
-2. **增强数据可视化**：
-   - 添加 Redis 数据的图表展示
-   - 增加数据统计功能
+#### storage/trash.rs
 
-3. **添加集群管理**：
-   - 支持 Redis 集群的管理
+废键箱数据持久化。
 
-4. **增强安全性**：
-   - 添加用户认证
-   - 支持 HTTPS
+| 结构体 | 字段 |
+|--------|------|
+| `TrashConnection` | host, port, password?, db |
+| `TrashItem` | id, server_id, key, value, key_type, connection, deleted_at, expires_at |
+| `TrashData` | items: Vec\<TrashItem\> |
+| `TrashManager` | data, trash_path |
 
-## 10. 参考资料
+| 属性 | 值 |
+|------|-----|
+| 存储路径 | `$HOME/.redis-helper/trash.json` |
+| 过期策略 | 7 天（通过 `expires_at` RFC3339 时间戳） |
+| 管理器方法 | new, save, add_item, remove_item, remove_items, get_items_by_server, get_item, cleanup_expired |
 
-- **Betterlife 框架**：https://gitee.com/skygreen2015/betterlife
-- **Betterlife.Front 框架**：https://gitee.com/skygreen2015/betterlife.front
-- **Redis 官方文档**：https://redis.io
-- **PhpRedis 扩展**：https://github.com/phpredis/phpredis
-- **PhpSpreadsheet**：https://github.com/PHPOffice/PhpSpreadsheet
+---
+
+## 6. Tauri 命令完整列表
+
+### 6.1 服务器管理（5 个）
+
+| 命令 | 参数 | 返回值 | 说明 |
+|------|------|--------|------|
+| `add_server` | ServerRequest | () | 添加服务器配置 |
+| `edit_server` | ServerRequest | () | 编辑服务器配置 |
+| `delete_server` | { id: String } | () | 删除服务器 |
+| `get_servers` | () | Vec\<ServerConfig\> | 获取所有服务器 |
+| `test_connection` | TestConnectionRequest | TestConnectionResponse | 测试连接 |
+
+### 6.2 Redis 操作（10 个）
+
+| 命令 | 参数 | 返回值 | 说明 |
+|------|------|--------|------|
+| `connect` | ConnectRequest | () | 连接 Redis |
+| `get_databases` | { host, port, password? } | Vec\<(u8, u64)\> | 获取数据库列表 |
+| `get_keys` | { host, port, password?, db } | Vec\<String\> | 获取所有键 |
+| `get_key_value` | KeyRequest | KeyValueResponse | 获取键值 |
+| `set_key_value` | KeyValueRequest | () | 设置键值 |
+| `delete_key` | KeyRequest | () | 删除键 |
+| `search_keys` | SearchRequest | Vec\<String\> | 搜索键 |
+| `create_database` | { host, port, password?, db } | () | 创建数据库 |
+| `delete_database` | { host, port, password?, db } | () | 删除数据库 |
+| `flush_database` | { host, port, password?, db } | () | 清空数据库 |
+
+### 6.3 导入导出（2 个）
+
+| 命令 | 参数 | 返回值 | 说明 |
+|------|------|--------|------|
+| `export_data` | ExportRequest | () | 导出为 JSON |
+| `import_data` | ImportRequest | () | 从 JSON 导入 |
+
+### 6.4 废键箱（7 个）
+
+| 命令 | 参数 | 返回值 | 说明 |
+|------|------|--------|------|
+| `move_to_trash` | MoveToTrashRequest | () | 移入废键箱 |
+| `batch_move_to_trash` | BatchMoveToTrashRequest | () | 批量移入 |
+| `get_trash_items` | { host, port } | Vec\<TrashItemResponse\> | 获取列表 |
+| `restore_from_trash` | { trash_id: String } | () | 恢复单个 |
+| `batch_restore_from_trash` | { trash_ids: Vec\<String\> } | () | 批量恢复 |
+| `permanent_delete_trash` | { trash_ids: Vec\<String\> } | () | 永久删除 |
+| `clear_expired_trash` | () | () | 清理过期 |
+
+---
+
+## 7. 数据存储
+
+| 文件 | 路径 | 内容 |
+|------|------|------|
+| 服务器配置 | `~/.redis-helper/config.json` | 服务器列表（id, name, host, port, password, db） |
+| 废键箱数据 | `~/.redis-helper/trash.json` | 废键项列表（key, value, type, deleted_at, expires_at） |
+
+---
+
+## 8. 依赖清单
+
+### 8.1 前端依赖
+
+| 包名 | 版本 | 用途 |
+|------|------|------|
+| vue | ^3.4.0 | 前端框架 |
+| pinia | ^2.1.7 | 状态管理 |
+| element-plus | ^2.4.4 | UI 组件库 |
+| @tauri-apps/api | ^2.0.0 | Tauri 前端 API |
+| @tauri-apps/plugin-dialog | ^2.7.0 | 文件对话框插件 |
+| typescript | ^5.2.2 | TypeScript |
+| vite | ^5.0.8 | 构建工具 |
+
+### 8.2 后端依赖
+
+| 包名 | 版本 | 用途 |
+|------|------|------|
+| tauri | ^2.0.0 | Tauri 框架 |
+| tauri-plugin-dialog | 2 | 文件对话框插件 |
+| redis | ^0.26.0 | Redis 客户端 |
+| tokio | 1.0 (full) | 异步运行时 |
+| serde | 1.0 (derive) | 序列化 |
+| serde_json | 1.0 | JSON 处理 |
+| chrono | 0.4 (serde) | 时间日期 |
+| uuid | 1.0 (v4) | UUID 生成 |
+
+---
+
+## 9. 构建配置
+
+### 9.1 NPM Scripts
+
+| 脚本 | 命令 | 说明 |
+|------|------|------|
+| `dev` | `vite` | 启动前端开发服务器 |
+| `build` | `vue-tsc && vite build` | 构建前端 |
+| `tauri:dev` | `tauri dev` | 启动 Tauri 开发模式 |
+| `tauri:build` | `tauri build` | 构建当前平台 |
+| `tauri:build:mac` | `tauri build --target universal-apple-darwin` | 构建 macOS |
+| `tauri:build:windows` | `tauri build --target x86_64-pc-windows-gnu` | 构建 Windows |
+
+### 9.2 Vite 分包策略
+
+| Chunk | 包含模块 |
+|-------|---------|
+| `vue-vendor` | vue, pinia |
+| `element-plus` | element-plus |
+| `tauri-api` | @tauri-apps/api/core |
+
+### 9.3 Tauri 窗口配置
+
+| 配置项 | 值 |
+|--------|-----|
+| productName | Redis小助手 |
+| identifier | com.redis.helper |
+| 窗口尺寸 | 1000 x 800 |
+| 分类 | DeveloperTool |
+| 前端开发地址 | http://localhost:5173 |
+| 前端构建目录 | ../dist |

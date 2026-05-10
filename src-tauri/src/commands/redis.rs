@@ -167,3 +167,59 @@ pub fn flush_database(req: ConnectRequest) -> Result<bool, String> {
         Err(e) => Err(e.to_string()),
     }
 }
+
+#[tauri::command]
+pub fn generate_test_data(req: ConnectRequest, count: u32) -> Result<bool, String> {
+    use rand::Rng;
+    
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            
+            let mut rng = rand::thread_rng();
+            let key_types = vec!["string", "hash", "list", "set"];
+            
+            for i in 0..count {
+                let key_type = key_types[rng.gen_range(0..key_types.len())];
+                let key_name = format!("test_key_{}_{}", i, rng.gen_range(1000..9999));
+                
+                match key_type {
+                    "string" => {
+                        let value = format!("value_{}", rng.gen_range(1..10000));
+                        conn.set_key_value(&key_name, &value, "string").map_err(|e| e.to_string())?;
+                    }
+                    "hash" => {
+                        let json_value = format!(
+                            "{{\"field1\":\"value{}\",\"field2\":\"value{}\"}}",
+                            rng.gen_range(1..100),
+                            rng.gen_range(1..100)
+                        );
+                        conn.set_key_value(&key_name, &json_value, "hash").map_err(|e| e.to_string())?;
+                    }
+                    "list" => {
+                        let json_value = format!(
+                            "[\"item{}\",\"item{}\",\"item{}\"]",
+                            rng.gen_range(1..100),
+                            rng.gen_range(1..100),
+                            rng.gen_range(1..100)
+                        );
+                        conn.set_key_value(&key_name, &json_value, "list").map_err(|e| e.to_string())?;
+                    }
+                    "set" => {
+                        let json_value = format!(
+                            "[\"member{}\",\"member{}\",\"member{}\"]",
+                            rng.gen_range(1..100),
+                            rng.gen_range(1..100),
+                            rng.gen_range(1..100)
+                        );
+                        conn.set_key_value(&key_name, &json_value, "set").map_err(|e| e.to_string())?;
+                    }
+                    _ => {}
+                }
+            }
+            
+            Ok(true)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}

@@ -25,6 +25,7 @@ fn main() {
             commands::redis::create_database,
             commands::redis::delete_database,
             commands::redis::flush_database,
+            commands::redis::generate_test_data,
             commands::export::export_data,
             commands::export::import_data,
             commands::trash::move_to_trash,

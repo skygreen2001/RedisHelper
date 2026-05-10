@@ -16,7 +16,7 @@
       <div class="menu-left">
         <el-dropdown @command="handleDeviceCommand">
           <span class="el-dropdown-link">
-            设备 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            连接 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </span>
           <template #dropdown>
             <el-dropdown-menu>
@@ -59,6 +59,55 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
+        <el-dropdown @command="handleActionCommand">
+          <span class="el-dropdown-link">
+            更多 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </span>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="import">
+                <el-icon><Upload /></el-icon> 导入
+              </el-dropdown-item>
+              <el-dropdown-item command="export">
+                <el-icon><Download /></el-icon> 导出
+              </el-dropdown-item>
+              <el-dropdown-item command="flush" divided>
+                <el-icon><Delete /></el-icon> 清空
+              </el-dropdown-item>
+              <el-dropdown-item command="generateTestData">
+                <el-icon><Plus /></el-icon> 生成测试数据
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button
+          :type="isMultiSelectMode ? 'warning' : 'default'"
+          size="small"
+          class="menu-multi-select-btn"
+          @click="toggleMultiSelectMode"
+        >
+          <el-icon><Select /></el-icon>
+          <span>{{ isMultiSelectMode ? '取消' : '多选' }}</span>
+          <el-tag v-if="isMultiSelectMode && selectedKeys.length > 0"
+                  type="danger" size="small" class="multi-select-count-tag">
+            {{ selectedKeys.length }}
+          </el-tag>
+        </el-button>
+        <el-dropdown @command="handleSortCommand">
+          <span class="el-dropdown-link sort-link">
+            排序 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </span>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="asc">
+                <el-icon><SortUp /></el-icon> 升序 A→Z
+              </el-dropdown-item>
+              <el-dropdown-item command="desc">
+                <el-icon><SortDown /></el-icon> 降序 Z→A
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
@@ -80,6 +129,7 @@
       <div class="key-list">
         <!-- 搜索和操作栏 -->
         <div class="search-and-actions">
+          <!-- 搜索模式 -->
           <div class="search-section">
             <el-button
               type="primary"
@@ -93,16 +143,11 @@
             <el-input
               v-model="searchPattern"
               placeholder="请输入关键词"
+              clearable
               @keyup.enter="searchKeys"
+              @clear="searchPattern = ''"
               class="search-input"
             />
-            <el-button
-              v-if="searchPattern"
-              @click="searchPattern = ''"
-              class="clear-btn"
-            >
-              <el-icon><Close /></el-icon>
-            </el-button>
             <el-button
               type="primary"
               size="small"
@@ -111,77 +156,28 @@
             >
               搜索
             </el-button>
-            <!-- 多选功能已屏蔽 -->
-            <!--
-            <el-button
-              :type="isMultiSelectMode ? 'warning' : 'default'"
-              size="small"
-              @click="toggleMultiSelectMode"
-              class="multi-select-btn"
-            >
-              <el-icon><Select /></el-icon>
-              <span>{{ isMultiSelectMode ? '取消多选' : '多选' }}</span>
-            </el-button>
-            <el-button
-              v-if="isMultiSelectMode && selectedKeys.length > 0"
-              type="danger"
-              size="small"
-              @click="batchMoveToTrash"
-              class="batch-delete-btn"
-            >
-              <el-icon><Delete /></el-icon>
-              <span>移入废键箱 ({{ selectedKeys.length }})</span>
-            </el-button>
-            -->
-            <el-dropdown @command="handleActionCommand" class="more-actions">
+            <el-tooltip content="添加键" placement="top">
               <el-button
-                type="primary"
-                plain
+                type="success"
                 size="small"
+                @click="showAddKeyDialog = true"
+                class="add-key-btn"
               >
-                <el-icon><More /></el-icon>
+                <el-icon><Plus /></el-icon>
               </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="add">
-                    添加
-                  </el-dropdown-item>
-                  <el-dropdown-item command="import">
-                    导入
-                  </el-dropdown-item>
-                  <el-dropdown-item command="export">
-                    导出
-                  </el-dropdown-item>
-                  <el-dropdown-item command="flush" divided type="danger">
-                    清空
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            </el-tooltip>
           </div>
         </div>
         <!-- 键列表 -->
         <div class="key-list-content">
           <el-scrollbar>
             <el-tree
-              v-if="!isMultiSelectMode"
               :data="keyTree"
               node-key="id"
               default-expand-all
+              :show-checkbox="isMultiSelectMode"
+              :highlight-current="!isMultiSelectMode"
               @node-click="handleKeyClick"
-              :highlight-current="true"
-              empty-text="暂无数据"
-            >
-              <template #default="{ node }">
-                <span class="key-item">{{ node.label }}</span>
-              </template>
-            </el-tree>
-            <el-tree
-              v-else
-              :data="keyTree"
-              node-key="id"
-              default-expand-all
-              show-checkbox
               @check-change="handleCheckChange"
               ref="treeRef"
               empty-text="暂无数据"
@@ -194,7 +190,45 @@
         </div>
 
         <!-- 分页加载控制区域：全部加载后完全隐藏，让出空间 -->
-        <div class="key-list-footer" v-if="hasMoreKeys || isLoadingAll || loadedCount === 0">
+        <div class="key-list-footer" v-if="!isTrashView">
+
+          <!-- 多选操作面板（向上展开） -->
+          <el-collapse-transition>
+            <div class="multi-select-panel" v-show="isMultiSelectMode">
+              <div class="multi-select-panel-actions">
+                <el-dropdown @command="handleSelectAllCommand" trigger="click">
+                  <el-button size="small">
+                    全选 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="loaded">
+                        全选当前已加载 ({{ loadedCount }})
+                      </el-dropdown-item>
+                      <el-dropdown-item command="all">
+                        全选所有 ({{ keysTotal }})
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+                <el-button size="small" @click="clearSelection" :disabled="selectedKeys.length === 0">
+                  取消
+                </el-button>
+                <el-button
+                  type="danger"
+                  size="small"
+                  @click="batchMoveToTrash"
+                  :disabled="selectedKeys.length === 0"
+                >
+                  <el-icon><Delete /></el-icon>
+                  移入 ({{ selectedKeys.length }})
+                </el-button>
+              </div>
+              <div class="multi-select-panel-hint">
+                快捷键: Ctrl+A 全选当前 | Ctrl+Shift+A 全选所有 | Esc 退出
+              </div>
+            </div>
+          </el-collapse-transition>
 
           <!-- 加载所有进度显示 -->
           <div class="loading-all-progress" v-if="isLoadingAll">
@@ -209,12 +243,12 @@
           </div>
 
           <!-- 加载按钮 + 数量显示 -->
-          <div class="load-actions" v-if="hasMoreKeys && !isLoadingAll">
+          <div class="load-actions" v-if="hasMoreKeys || isLoadingAll || loadedCount === 0">
             <el-button
               class="load-btn"
               @click="handleLoadMore"
               :loading="isLoadingMore"
-              :disabled="isLoadingAll"
+              :disabled="isLoadingAll || !hasMoreKeys"
             >
               加载更多
             </el-button>
@@ -225,7 +259,7 @@
             <el-button
               class="load-btn"
               @click="handleLoadAll"
-              :disabled="isLoadingMore"
+              :disabled="isLoadingMore || !hasMoreKeys"
             >
               加载所有
             </el-button>
@@ -313,6 +347,7 @@
       v-model="showAddKeyDialog"
       title="添加键"
       width="500px"
+      custom-class="bounce-dialog"
     >
       <el-form :model="newKeyForm" label-width="80px">
         <el-form-item label="键名" required>
@@ -516,8 +551,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
-import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, Close, More, FolderOpened } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
 import { trashStore } from '../stores/trashStore'
@@ -556,6 +591,27 @@ const newlyCreatedDbs = ref<Set<number>>(new Set())
 // 记录所有曾经访问过（选中过）的 DB，即使变空也保留在列表中
 const visitedDbs = ref<Set<number>>(new Set())
 const keys = ref<string[]>([])
+const sortOrder = ref<'none' | 'asc' | 'desc'>('none')
+
+// 排序后的 keys
+const sortedKeys = computed(() => {
+  if (sortOrder.value === 'asc') {
+    return [...keys.value].sort((a, b) => a.localeCompare(b))
+  } else if (sortOrder.value === 'desc') {
+    return [...keys.value].sort((a, b) => b.localeCompare(a))
+  }
+  return keys.value
+})
+
+// 处理排序命令
+const handleSortCommand = (command: string) => {
+  if (command === sortOrder.value) {
+    // 再次点击同一排序，取消排序
+    sortOrder.value = 'none'
+  } else {
+    sortOrder.value = command as 'asc' | 'desc'
+  }
+}
 
 // ========== 分页加载相关状态 ==========
 const keysCursor = ref<number>(0)         // SCAN 游标
@@ -591,6 +647,15 @@ const showFlushDialog = ref<boolean>(false)
 const isMultiSelectMode = ref<boolean>(false)
 const selectedKeys = ref<string[]>([])
 const treeRef = ref<any>(null)
+// 多选面板折叠状态（记住用户偏好）
+const MULTI_SELECT_PANEL_KEY = 'redis-helper-multi-select-panel'
+const isMultiSelectPanelExpanded = ref<boolean>(
+  localStorage.getItem(MULTI_SELECT_PANEL_KEY) !== 'false'
+)
+// 监听折叠状态变化
+watch(isMultiSelectPanelExpanded, (val) => {
+  localStorage.setItem(MULTI_SELECT_PANEL_KEY, String(val))
+})
 // 废键箱视图
 const isTrashView = ref<boolean>(false)
 const trashSelectedIds = ref<string[]>([])
@@ -606,7 +671,7 @@ const toggleDbSelection = (db: number) => {
   }
 }
 
-// 处理设备下拉菜单命令
+// 处理连接下拉菜单命令
 const handleDeviceCommand = (command: any) => {
   if (command === 'settings') {
     // 显示服务器配置页面
@@ -659,6 +724,40 @@ const handleActionCommand = (command: string) => {
     case 'flush':
       showFlushDialog.value = true
       break
+    case 'generateTestData':
+      handleGenerateTestData()
+      break
+  }
+}
+
+// 生成测试数据
+const handleGenerateTestData = async () => {
+  if (!selectedServer.value || selectedDb.value === null) return
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要在当前数据库(DB ${selectedDb.value})生成100个测试键吗？`,
+      '生成测试数据',
+      { confirmButtonText: '确认生成', cancelButtonText: '取消', type: 'info' }
+    )
+
+    message.value = ''
+    await redis.generateTestData({
+      host: selectedServer.value.host,
+      port: selectedServer.value.port,
+      password: selectedServer.value.password,
+      db: selectedDb.value
+    }, 100)
+
+    await loadKeys()
+    await loadDatabases()
+
+    messageType.value = 'success'
+    message.value = '已生成100个测试键'
+  } catch (error: any) {
+    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
+    messageType.value = 'error'
+    message.value = `生成测试数据失败: ${error.message || error}`
   }
 }
 
@@ -701,18 +800,18 @@ const handleFlush = async () => {
 // 各类型示例提示
 const typePlaceholders: Record<string, string> = {
   string: '输入字符串值',
-  list: '输入列表元素，每行一个',
-  set: '输入集合元素，每行一个',
-  zset: '输入格式：分数 值\n示例：\n100 item1\n200 item2',
-  hash: '输入格式：字段:值\n示例：\nname:张三\nage:25'
+  list: '输入 JSON 数组格式',
+  set: '输入 JSON 数组格式',
+  zset: '输入 JSON 数组格式',
+  hash: '输入 JSON 对象格式\n示例：\n{\n  "field1": "value1",\n  "field2": "value2"\n}'
 }
 
 const typeExamples: Record<string, string> = {
   string: 'Hello world\n或者\n{"name":"张三","age":25}',
-  list: 'item1\nitem2\nitem3',
-  set: 'member1\nmember2\nmember3',
-  zset: '100 member1\n200 member2\n300 member3',
-  hash: 'field1:value1\nfield2:value2'
+  list: '["item1", "item2", "item3"]',
+  set: '["member1", "member2", "member3"]',
+  zset: '[["player1", 100], ["player2", 80]]',
+  hash: '{\n  "field1": "value1",\n  "field2": "value2"\n}'
 }
 
 // 表单数据
@@ -731,7 +830,7 @@ const editKeyForm = ref({
 // 计算属性
 const servers = computed(() => server.servers)
 const keyTree = computed(() => {
-  return keys.value.map(key => ({
+  return sortedKeys.value.map(key => ({
     id: key,
     label: key
   }))
@@ -741,12 +840,22 @@ const keyTree = computed(() => {
 
 // 方法
 const handleServerChange = async () => {
+  // 切换服务器时退出多选模式
+  if (isMultiSelectMode.value) {
+    isMultiSelectMode.value = false
+    clearSelection()
+  }
   if (selectedServer.value) {
     await loadDatabases()
   }
 }
 
 const handleDbChange = async () => {
+  // 切换 DB 时退出多选模式
+  if (isMultiSelectMode.value) {
+    isMultiSelectMode.value = false
+    clearSelection()
+  }
   // 切换 DB 时重置分页状态
   await loadKeys(true)
 }
@@ -1047,8 +1156,72 @@ const searchKeys = async () => {
 }
 
 const addKey = async () => {
-  if (!selectedServer.value || !newKeyForm.value.key) return
-  
+  if (!selectedServer.value) return
+
+  const type = newKeyForm.value.type
+  const key = newKeyForm.value.key.trim()
+  const value = newKeyForm.value.value.trim()
+
+  // 校验：请输入键
+  if (!key) {
+    ElMessageBox.alert('请输入键名称', '提示', { type: 'warning' })
+    return
+  }
+
+  // 校验：键格式（不允许包含空格和特殊控制字符）
+  if (/[\s\x00-\x1f\x7f]/.test(key)) {
+    ElMessageBox.alert('键名不能包含空格或特殊字符\n\n示例：user:1001、order_info、my_key', '提示', { type: 'warning' })
+    return
+  }
+
+  // 校验：请输入值
+  if (!value) {
+    const typeValueExamples: Record<string, string> = {
+      string: 'Hello world',
+      list: '["item1", "item2", "item3"]',
+      set: '["member1", "member2", "member3"]',
+      zset: '[["player1", 100], ["player2", 80]]',
+      hash: '{"field1": "value1", "field2": "value2"}'
+    }
+    ElMessageBox.alert(`请输入键的值\n\n${type} 类型值示例：\n${typeValueExamples[type] || ''}`, '提示', { type: 'warning' })
+    return
+  }
+
+  // 校验：非 string 类型的值必须是有效 JSON
+  if (type !== 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      // 校验 JSON 结构
+      if (type === 'list' && !Array.isArray(parsed)) {
+        ElMessageBox.alert('列表类型的值必须是 JSON 数组\n\n示例：\n["item1", "item2", "item3"]', '提示', { type: 'warning' })
+        return
+      }
+      if (type === 'set' && !Array.isArray(parsed)) {
+        ElMessageBox.alert('集合类型的值必须是 JSON 数组\n\n示例：\n["member1", "member2", "member3"]', '提示', { type: 'warning' })
+        return
+      }
+      if (type === 'zset') {
+        if (!Array.isArray(parsed) || !parsed.every(item => Array.isArray(item) && item.length === 2)) {
+          ElMessageBox.alert('有序集合类型的值必须是 JSON 数组，每个元素为 [成员, 分数]\n\n示例：\n[["player1", 100], ["player2", 80]]', '提示', { type: 'warning' })
+          return
+        }
+      }
+      if (type === 'hash' && (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null)) {
+        ElMessageBox.alert('哈希类型的值必须是 JSON 对象\n\n示例：\n{"field1": "value1", "field2": "value2"}', '提示', { type: 'warning' })
+        return
+      }
+    } catch {
+      const typeValueExamples: Record<string, string> = {
+        list: '["item1", "item2", "item3"]',
+        set: '["member1", "member2", "member3"]',
+        zset: '[["player1", 100], ["player2", 80]]',
+        hash: '{"field1": "value1", "field2": "value2"}'
+      }
+      ElMessageBox.alert(`值格式不正确，${type} 类型需要有效的 JSON 格式\n\n示例：\n${typeValueExamples[type] || ''}`, '提示', { type: 'warning' })
+      return
+    }
+  }
+
   try {
     message.value = ''
     // 压缩JSON后保存
@@ -1073,8 +1246,7 @@ const addKey = async () => {
     }
   } catch (error: any) {
     console.error('添加键失败:', error)
-    messageType.value = 'error'
-    message.value = `添加键失败: ${error.message || error}`
+    ElMessageBox.alert(`添加键失败，请检查输入是否正确`, '错误', { type: 'error' })
   }
 }
 
@@ -1373,11 +1545,19 @@ onMounted(async () => {
       selectedServer.value = servers.value[0]
       await loadDatabases()
     }
+    
+    // 注册键盘快捷键
+    document.addEventListener('keydown', handleKeyDown)
   } catch (error: any) {
     console.error('初始化失败:', error)
     messageType.value = 'error'
     message.value = `初始化失败: ${error.message || error}`
   }
+})
+
+// 组件卸载时清理
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeyDown)
 })
 
 const importData = async () => {
@@ -1493,6 +1673,114 @@ const deleteDb = async () => {
 }
 
 // ========== 废键箱相关方法 ==========
+
+// ========== 多选操作方法 ==========
+
+// 切换多选模式
+const toggleMultiSelectMode = () => {
+  isMultiSelectMode.value = !isMultiSelectMode.value
+  if (!isMultiSelectMode.value) {
+    // 退出时清空选择
+    clearSelection()
+  }
+}
+
+// 处理全选下拉命令
+const handleSelectAllCommand = async (command: string) => {
+  if (command === 'loaded') {
+    selectAllLoaded()
+  } else if (command === 'all') {
+    await selectAllKeys()
+  }
+}
+
+// 全选当前已加载
+const selectAllLoaded = () => {
+  if (treeRef.value) {
+    treeRef.value.setCheckedKeys(keys.value)
+    selectedKeys.value = [...keys.value]
+  }
+}
+
+// 全选所有（异步）
+const selectAllKeys = async () => {
+  if (hasMoreKeys.value) {
+    await handleLoadAll()
+  }
+  await nextTick()
+  selectAllLoaded()
+}
+
+// 取消选择
+const clearSelection = () => {
+  if (treeRef.value) {
+    treeRef.value.setCheckedKeys([])
+    selectedKeys.value = []
+  }
+}
+
+// 批量移入废键箱
+const batchMoveToTrash = async () => {
+  if (selectedKeys.value.length === 0 || !selectedServer.value) return
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要将选中的 ${selectedKeys.value.length} 个键移入废键箱吗？`,
+      '批量删除确认',
+      {
+        confirmButtonText: '确认',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    message.value = ''
+
+    const count = await trash.batchMoveToTrash({
+      host: selectedServer.value.host,
+      port: selectedServer.value.port,
+      password: selectedServer.value.password,
+      db: selectedDb.value ?? 0,
+      keys: selectedKeys.value
+    })
+
+    // 清空选择并刷新
+    selectedKeys.value = []
+    isMultiSelectMode.value = false
+    await loadKeys()
+    await loadDatabases()
+    await loadTrashItems()
+
+    messageType.value = 'success'
+    message.value = `已将 ${count} 个键移入废键箱，7天后自动清除`
+  } catch (error: any) {
+    if (error === 'cancel') return
+    messageType.value = 'error'
+    message.value = `批量删除失败: ${error.message || error}`
+  }
+}
+
+// 键盘快捷键处理
+const handleKeyDown = (event: KeyboardEvent) => {
+  if (!isMultiSelectMode.value) return
+
+  // Ctrl+A: 全选当前已加载
+  if (event.ctrlKey && event.key === 'a' && !event.shiftKey) {
+    event.preventDefault()
+    selectAllLoaded()
+  }
+
+  // Ctrl+Shift+A: 全选所有
+  if (event.ctrlKey && event.shiftKey && (event.key === 'A' || event.key === 'a')) {
+    event.preventDefault()
+    selectAllKeys()
+  }
+
+  // Escape: 退出多选模式
+  if (event.key === 'Escape') {
+    toggleMultiSelectMode()
+  }
+}
 
 // 处理多选勾选变化
 const handleCheckChange = () => {
@@ -1661,7 +1949,7 @@ const currentServerTrashCount = computed(() => {
 
 .menu-left {
   display: flex;
-  gap: 30px;
+  gap: 0;
 }
 
 .el-dropdown-link {
@@ -1671,14 +1959,58 @@ const currentServerTrashCount = computed(() => {
   align-items: center;
   gap: 4px;
   font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 4px;
+  padding: 8px 16px;
+  border-radius: 0;
   transition: all 0.3s ease;
+}
+
+/* 确保所有 dropdown 触发器内文字大小一致 */
+.menu-bar :deep(.el-dropdown) {
+  font-size: 14px;
+}
+
+.sort-link {
+  font-weight: bold;
 }
 
 .el-dropdown-link:hover {
   color: #ecf5ff;
   background-color: rgba(255, 255, 255, 0.1);
+}
+
+.menu-multi-select-btn {
+  color: #ffffff;
+  border-color: transparent;
+  background-color: transparent;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  border-radius: 0;
+  padding: 8px 16px;
+  font-size: 14px;
+  height: auto;
+}
+
+.menu-multi-select-btn:hover {
+  color: #ecf5ff;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: transparent;
+}
+
+.menu-multi-select-btn.warning {
+  background-color: rgba(230, 162, 60, 0.9) !important;
+  border-color: #e6a23c !important;
+  color: #ffffff !important;
+}
+
+.menu-multi-select-btn.warning:hover {
+  background-color: #e6a23c !important;
+  border-color: #e6a23c !important;
+}
+
+.multi-select-count-tag {
+  margin-left: 4px;
+  line-height: 1;
 }
 
 /* 状态栏 */
@@ -1773,25 +2105,30 @@ const currentServerTrashCount = computed(() => {
 }
 
 .search-input :deep(.el-input__wrapper.is-focus) {
-  box-shadow: none;
+  box-shadow: 0 0 0 1px #1890ff inset;
   border-color: #1890ff;
 }
 
-.clear-btn {
-  position: absolute;
-  right: 60px;
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 0;
-  min-width: 24px;
-  height: 24px;
-  background: transparent;
-  z-index: 1;
+/* 弹跳对话框动画 */
+.bounce-dialog {
+  animation: bounce-in 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
-.clear-btn:hover {
-  color: #f56c6c;
-  background: transparent;
+@keyframes bounce-in {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 /* 下拉菜单样式 */
@@ -1826,7 +2163,7 @@ const currentServerTrashCount = computed(() => {
   margin-left: 10px;
 }
 
-.more-actions .el-button {
+.add-key-btn {
   border-radius: 4px;
   min-width: 36px;
   height: 36px;
@@ -1834,14 +2171,11 @@ const currentServerTrashCount = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #dcdfe6;
-  color: #606266;
 }
 
-.more-actions .el-button:hover {
-  border-color: #1890ff;
-  background-color: #1890ff;
-  color: #ffffff;
+.add-key-btn:hover {
+  background-color: #95d475;
+  border-color: #95d475;
 }
 
 .key-list-content {
@@ -2208,7 +2542,19 @@ const currentServerTrashCount = computed(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.load-actions .el-button {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.load-actions .count-divider {
+  flex-shrink: 0;
+  font-size: 13px;
 }
 
 /* 加载按钮统一样式：透明底灰字边框，hover 蓝底白字 */
@@ -2266,5 +2612,37 @@ const currentServerTrashCount = computed(() => {
 .loading-text {
   font-size: 12px;
   color: #909399;
+}
+
+/* ========== 多选操作面板样式 ========== */
+.multi-select-panel {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e4e7ed;
+  background-color: #fffbeb;
+}
+
+.multi-select-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.multi-select-panel-hint {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #e4e7ed;
+  font-size: 12px;
+  color: #909399;
+}
+
+.multi-select-count-tag {
+  margin-left: 2px;
+  line-height: 1;
+}
+
+/* 多选模式下的树节点样式调整 */
+.key-list :deep(.el-tree.show-checkbox .el-tree-node__content) {
+  padding-left: 8px;
 }
 </style>

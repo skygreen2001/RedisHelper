@@ -163,6 +163,15 @@ export const redisStore = defineStore('redis', {
         console.error('清空数据库失败:', error)
         throw error
       }
+    },
+
+    async generateTestData(params: ConnectRequest, count: number): Promise<boolean> {
+      try {
+        return await invoke<boolean>('generate_test_data', { req: params, count })
+      } catch (error) {
+        console.error('生成测试数据失败:', error)
+        throw error
+      }
     }
   }
 })
