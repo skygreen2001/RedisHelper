@@ -261,8 +261,15 @@
             <span class="loading-text">正在加载所有 keys... ({{ loadedCount }} / {{ keysTotal }})</span>
           </div>
 
-          <!-- 加载按钮 + 数量显示 -->
-          <div class="load-actions" v-if="hasMoreKeys || isLoadingAll || loadedCount === 0">
+          <!-- 搜索全部模式：仅显示匹配数量 -->
+          <div class="load-actions" v-if="searchPattern.trim() && searchAll">
+            <span class="search-match-count">
+              匹配 {{ filteredKeys.length }} 个
+            </span>
+          </div>
+
+          <!-- 非搜索全部模式：加载按钮 + 数量 + 搜索匹配数量 -->
+          <div class="load-actions" v-else-if="hasMoreKeys || isLoadingAll || loadedCount === 0">
             <el-button
               class="load-btn"
               @click="handleLoadMore"
@@ -282,6 +289,10 @@
             >
               加载所有
             </el-button>
+            <!-- 搜索匹配数量（仅已加载模式） -->
+            <span v-if="searchPattern.trim() && filteredKeys.length > 0" class="search-match-count">
+              匹配 {{ filteredKeys.length }} 个
+            </span>
           </div>
         </div>
       </div>
@@ -2715,6 +2726,13 @@ const currentServerTrashCount = computed(() => {
 .load-actions .count-divider {
   flex-shrink: 0;
   font-size: 13px;
+}
+
+.load-actions .search-match-count {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #1890ff;
+  font-weight: 500;
 }
 
 /* 加载按钮统一样式：透明底灰字边框，hover 蓝底白字 */
