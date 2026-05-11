@@ -60,7 +60,7 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <el-dropdown @command="handleActionCommand">
+        <el-dropdown v-if="!isTrashView" @command="handleActionCommand">
           <span class="el-dropdown-link">
             更多 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </span>
@@ -83,6 +83,7 @@
           </template>
         </el-dropdown>
         <el-button
+          v-if="!isTrashView"
           :type="isMultiSelectMode ? 'warning' : 'default'"
           size="small"
           class="menu-multi-select-btn"
@@ -95,7 +96,7 @@
             {{ selectedKeys.length }}
           </el-tag>
         </el-button>
-        <el-dropdown @command="handleSortCommand">
+        <el-dropdown v-if="!isTrashView" @command="handleSortCommand">
           <span class="el-dropdown-link sort-link">
             排序 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </span>
@@ -209,7 +210,7 @@
         </div>
 
         <!-- 分页加载控制区域：全部加载后完全隐藏，让出空间 -->
-        <div class="key-list-footer" v-if="!isTrashView">
+        <div class="key-list-footer" v-if="showKeyListFooter">
 
           <!-- 多选操作面板（向上展开） -->
           <el-collapse-transition>
@@ -269,7 +270,7 @@
           </div>
 
           <!-- 非搜索全部模式：加载按钮 + 数量 + 搜索匹配数量 -->
-          <div class="load-actions" v-else-if="hasMoreKeys || isLoadingAll || loadedCount === 0">
+          <div class="load-actions" v-else-if="(hasMoreKeys || isLoadingAll) && keysTotal > 0">
             <el-button
               class="load-btn"
               @click="handleLoadMore"
@@ -369,7 +370,7 @@
 
     <!-- 底部标题栏 -->
     <div class="footer">
-      Redis 系统数据监控  BB只为更好
+      Redis 系统数据监控 只为更好的体验
     </div>
 
     <!-- 添加键对话框 -->
@@ -721,6 +722,20 @@ watch(isMultiSelectPanelExpanded, (val) => {
 // 废键箱视图
 const isTrashView = ref<boolean>(false)
 const trashSelectedIds = ref<string[]>([])
+
+// 是否显示 key-list-footer（多选面板、加载进度、加载按钮）
+const showKeyListFooter = computed(() => {
+  if (isTrashView.value) return false
+  // 多选模式
+  if (isMultiSelectMode.value) return true
+  // 正在加载所有
+  if (isLoadingAll.value) return true
+  // 搜索全部模式且有搜索关键词
+  if (searchPattern.value.trim() && searchAll.value) return true
+  // 有未加载完的 keys
+  if ((hasMoreKeys.value || isLoadingAll.value) && keysTotal.value > 0) return true
+  return false
+})
 
 
 // 切换数据库选择状态
@@ -2086,7 +2101,7 @@ const currentServerTrashCount = computed(() => {
 .menu-bar {
   background-color: #1890ff;
   color: white;
-  padding: 0 20px;
+  padding: 0 20px 0 5px;
   height: 48px;
   display: flex;
   align-items: center;
@@ -2191,6 +2206,7 @@ const currentServerTrashCount = computed(() => {
   display: flex;
   flex-direction: column;
   background-color: #ffffff;
+  overflow: hidden;
 }
 
 /* 搜索和操作栏 */
@@ -2526,14 +2542,14 @@ const currentServerTrashCount = computed(() => {
 
 /* 空状态 */
 .empty-state {
-  height: 100%;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   background-color: #fafafa;
   border: 1px dashed #d9d9d9;
   border-radius: 4px;
-  margin: 20px;
+  margin: 0;
 }
 
 /* 对话框 */

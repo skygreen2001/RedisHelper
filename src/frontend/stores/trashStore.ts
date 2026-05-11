@@ -71,7 +71,7 @@ export const trashStore = defineStore('trash', {
 
     async restoreFromTrash(trashId: string): Promise<boolean> {
       try {
-        return await invoke<boolean>('restore_from_trash', { trashId })
+        return await invoke<boolean>('restore_from_trash', { req: { trash_id: trashId } })
       } catch (error) {
         console.error('恢复键失败:', error)
         throw error
@@ -80,7 +80,7 @@ export const trashStore = defineStore('trash', {
 
     async batchRestoreFromTrash(trashIds: string[]): Promise<number> {
       try {
-        return await invoke<number>('batch_restore_from_trash', { trashIds })
+        return await invoke<number>('batch_restore_from_trash', { req: { trash_ids: trashIds } })
       } catch (error) {
         console.error('批量恢复键失败:', error)
         throw error
@@ -89,7 +89,7 @@ export const trashStore = defineStore('trash', {
 
     async permanentDelete(trashIds: string[]): Promise<number> {
       try {
-        return await invoke<number>('permanent_delete_trash', { trashIds })
+        return await invoke<number>('permanent_delete_trash', { req: { trash_ids: trashIds } })
       } catch (error) {
         console.error('永久删除失败:', error)
         throw error
