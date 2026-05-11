@@ -144,10 +144,10 @@
             </el-button>
             <el-input
               v-model="searchPattern"
-              placeholder="请输入关键词"
+              placeholder="搜索 key（不区分大小写）"
               clearable
               @keyup.enter="searchKeys"
-              @clear="searchPattern = ''"
+              @clear="searchPattern = ''; message = ''"
               class="search-input"
             />
             <el-button
@@ -605,6 +605,14 @@ const sortedKeys = computed(() => {
   return keys.value
 })
 
+// 不区分大小写过滤后的 keys（用于客户端实时搜索）
+const filteredKeys = computed(() => {
+  const pattern = searchPattern.value.trim()
+  if (!pattern) return sortedKeys.value
+  const lower = pattern.toLowerCase()
+  return sortedKeys.value.filter(k => k.toLowerCase().includes(lower))
+})
+
 // 处理排序命令
 const handleSortCommand = (command: string) => {
   if (command === sortOrder.value) {
@@ -778,7 +786,7 @@ const handleFlush = async () => {
 
   try {
     // 安全验证：要求输入服务器名称确认
-    const { value: inputName } = await ElMessageBox.prompt(
+    await ElMessageBox.prompt(
       `此操作将清空 DB ${selectedDb.value} 中的所有数据，不可恢复！\n\n请输入当前服务器名称 【${selectedServer.value.name}】 以确认操作：`,
       '清空数据库 - 安全验证',
       {
@@ -861,7 +869,7 @@ const editKeyForm = ref({
 const servers = computed(() => server.servers)
 const isCurrentServerReadonly = computed(() => selectedServer.value?.readonly === true)
 const keyTree = computed(() => {
-  return sortedKeys.value.map(key => ({
+  return filteredKeys.value.map(key => ({
     id: key,
     label: key
   }))
@@ -1158,27 +1166,40 @@ const compressJson = (value: string): string => {
 const searchKeys = async () => {
   if (!selectedServer.value) return
 
+  const input = searchPattern.value.trim()
+
+  // 如果输入不含 Redis 通配符（* ? [），直接走客户端过滤（filteredKeys computed 自动响应）
+  // 如果含通配符，走后端精确 pattern 查询
+  const hasWildcard = /[*?\[]/.test(input)
+  if (!hasWildcard) {
+    // 客户端过滤 —— filteredKeys 已自动响应 searchPattern 变化，无需手动操作
+    // 只需确保 keys 已加载（keysTotal 可能更大，提示用户）
+    if (keysTotal.value > keys.value.length && input) {
+      messageType.value = 'success'
+      message.value = `在已加载的 ${keys.value.length} 个 keys 中过滤（忽略大小写）。如需全量搜索，请点击「加载所有」后再搜索。`
+    }
+    return
+  }
+
+  // 含通配符 → 走后端
   try {
     message.value = ''
-    // 为搜索关键词添加通配符，实现模糊查询
-    const pattern = searchPattern.value
-      ? `*${searchPattern.value}*`
-      : '*'
-
     const result = await redis.searchKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0,
-      pattern
+      pattern: input || '*'
     })
 
-    // 设置搜索结果
-    keys.value = result
+    // 后端结果再做一次客户端不区分大小写过滤（兜底）
+    const lower = input.replace(/[*?\[]/g, '').toLowerCase()
+    keys.value = lower
+      ? result.filter(k => k.toLowerCase().includes(lower))
+      : result
 
-    // 搜索模式下重置分页状态
     keysCursor.value = 0
-    keysTotal.value = result.length
+    keysTotal.value = keys.value.length
   } catch (error: any) {
     console.error('搜索键失败:', error)
     messageType.value = 'error'
@@ -1701,7 +1722,7 @@ const deleteDb = async () => {
     message.value = ''
 
     // 安全验证：要求输入服务器名称确认
-    const { value: inputName } = await ElMessageBox.prompt(
+    await ElMessageBox.prompt(
       `此操作将删除 DB ${selectedDbsForDelete.value.join(', ')}，不可恢复！\n\n请输入当前服务器名称 【${selectedServer.value.name}】 以确认操作：`,
       '删除 DB - 安全验证',
       {
