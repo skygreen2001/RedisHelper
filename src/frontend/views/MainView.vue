@@ -144,12 +144,29 @@
             </el-button>
             <el-input
               v-model="searchPattern"
-              placeholder="搜索 key（不区分大小写）"
+              :placeholder="searchPlaceholder"
               clearable
               @keyup.enter="searchKeys"
               @clear="searchPattern = ''; message = ''"
               class="search-input"
             />
+            <el-dropdown @command="handleSearchOptionCommand" class="search-options-dropdown">
+              <el-icon :class="{ 'has-active-option': caseSensitive || !searchAll }"><Setting /></el-icon>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="toggleCaseSensitive">
+                    <el-icon v-if="!caseSensitive"><Check /></el-icon>
+                    <span v-else style="display:inline-block;width:16px;"></span>
+                    不区分大小写
+                  </el-dropdown-item>
+                  <el-dropdown-item command="toggleSearchAll">
+                    <el-icon v-if="searchAll"><Check /></el-icon>
+                    <span v-else style="display:inline-block;width:16px;"></span>
+                    搜索全部
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button
               type="primary"
               size="small"
@@ -554,7 +571,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown, Check } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
 import { trashStore } from '../stores/trashStore'
@@ -605,13 +622,33 @@ const sortedKeys = computed(() => {
   return keys.value
 })
 
-// 不区分大小写过滤后的 keys（用于客户端实时搜索）
+// 根据搜索选项过滤后的 keys（用于客户端实时搜索）
 const filteredKeys = computed(() => {
   const pattern = searchPattern.value.trim()
   if (!pattern) return sortedKeys.value
-  const lower = pattern.toLowerCase()
-  return sortedKeys.value.filter(k => k.toLowerCase().includes(lower))
+  if (caseSensitive.value) {
+    return sortedKeys.value.filter(k => k.includes(pattern))
+  } else {
+    const lower = pattern.toLowerCase()
+    return sortedKeys.value.filter(k => k.toLowerCase().includes(lower))
+  }
 })
+
+// 搜索框 placeholder 动态生成
+const searchPlaceholder = computed(() => {
+  const scope = searchAll.value ? '搜索全部 key' : '搜索已加载 key'
+  const caseInfo = caseSensitive.value ? '（区分大小写）' : ''
+  return scope + caseInfo
+})
+
+// 处理搜索选项命令
+const handleSearchOptionCommand = (command: string) => {
+  if (command === 'toggleCaseSensitive') {
+    caseSensitive.value = !caseSensitive.value
+  } else if (command === 'toggleSearchAll') {
+    searchAll.value = !searchAll.value
+  }
+}
 
 // 处理排序命令
 const handleSortCommand = (command: string) => {
@@ -622,6 +659,10 @@ const handleSortCommand = (command: string) => {
     sortOrder.value = command as 'asc' | 'desc'
   }
 }
+
+// ========== 搜索选项状态 ==========
+const caseSensitive = ref<boolean>(false) // 默认不区分大小写
+const searchAll = ref<boolean>(true)      // 默认搜索全部
 
 // ========== 分页加载相关状态 ==========
 const keysCursor = ref<number>(0)         // SCAN 游标
@@ -1173,10 +1214,9 @@ const searchKeys = async () => {
   const hasWildcard = /[*?\[]/.test(input)
   if (!hasWildcard) {
     // 客户端过滤 —— filteredKeys 已自动响应 searchPattern 变化，无需手动操作
-    // 只需确保 keys 已加载（keysTotal 可能更大，提示用户）
-    if (keysTotal.value > keys.value.length && input) {
-      messageType.value = 'success'
-      message.value = `在已加载的 ${keys.value.length} 个 keys 中过滤（忽略大小写）。如需全量搜索，请点击「加载所有」后再搜索。`
+    // 如果需要搜索全部且未全部加载，先加载全部
+    if (searchAll.value && keysCursor.value !== 0 && input) {
+      await handleLoadAll()
     }
     return
   }
@@ -2202,6 +2242,31 @@ const currentServerTrashCount = computed(() => {
 .search-input :deep(.el-input__wrapper.is-focus) {
   box-shadow: 0 0 0 1px #1890ff inset;
   border-color: #1890ff;
+}
+
+/* 搜索选项下拉菜单样式 */
+.search-options-dropdown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background-color: #f5f7fa;
+  border: 1px solid #dcdfe6;
+  border-left: none;
+  border-right: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: #909399;
+}
+
+.search-options-dropdown:hover {
+  background-color: #ecf5ff;
+  color: #1890ff;
+}
+
+.search-options-dropdown .has-active-option {
+  color: #1890ff;
 }
 
 /* 弹跳对话框动画 */
