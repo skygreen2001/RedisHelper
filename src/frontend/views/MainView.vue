@@ -775,33 +775,51 @@ const handleGenerateTestData = async () => {
 
 const handleFlush = async () => {
   if (!selectedServer.value || selectedDb.value === null) return
-  
-  const flushedDb = selectedDb.value // 暂存当前DB编号，清空后后端不会返回它
-  
+
   try {
+    // 安全验证：要求输入服务器名称确认
+    const { value: inputName } = await ElMessageBox.prompt(
+      `此操作将清空 DB ${selectedDb.value} 中的所有数据，不可恢复！\n\n请输入当前服务器名称 【${selectedServer.value.name}】 以确认操作：`,
+      '清空数据库 - 安全验证',
+      {
+        confirmButtonText: '确认清空',
+        cancelButtonText: '取消',
+        type: 'warning',
+        inputPlaceholder: `请输入 ${selectedServer.value.name}`,
+        inputValidator: (val: string) => {
+          if (!val || val.trim().toLowerCase() !== selectedServer.value.name.trim().toLowerCase()) {
+            return '服务器名称不匹配，请重新输入'
+          }
+          return true
+        }
+      }
+    )
+
     message.value = ''
-    
+    const flushedDb = selectedDb.value // 暂存当前DB编号，清空后后端不会返回它
+
     await redis.flushDatabase({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
       password: selectedServer.value.password,
       db: selectedDb.value
     })
-    
+
     showFlushDialog.value = false
-    
+
     selectedKey.value = ''
     keyValue.value = ''
     keyType.value = ''
-    
+
     // 刷新DB列表，同时确保清空的DB仍然显示（计数为0）
     newlyCreatedDbs.value.add(flushedDb)
     await loadDatabases()
     await loadKeys()
-    
+
     messageType.value = 'success'
     message.value = '数据库清空成功'
   } catch (error: any) {
+    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
     console.error('清空失败:', error)
     showFlushDialog.value = false
     messageType.value = 'error'
@@ -1681,7 +1699,25 @@ const deleteDb = async () => {
 
   try {
     message.value = ''
-    
+
+    // 安全验证：要求输入服务器名称确认
+    const { value: inputName } = await ElMessageBox.prompt(
+      `此操作将删除 DB ${selectedDbsForDelete.value.join(', ')}，不可恢复！\n\n请输入当前服务器名称 【${selectedServer.value.name}】 以确认操作：`,
+      '删除 DB - 安全验证',
+      {
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        inputPlaceholder: `请输入 ${selectedServer.value.name}`,
+        inputValidator: (val: string) => {
+          if (!val || val.trim().toLowerCase() !== selectedServer.value.name.trim().toLowerCase()) {
+            return '服务器名称不匹配，请重新输入'
+          }
+          return true
+        }
+      }
+    )
+
     // 批量删除选中的数据库
     for (const db of selectedDbsForDelete.value) {
       await redis.deleteDatabase({
@@ -1691,11 +1727,14 @@ const deleteDb = async () => {
         db
       })
     }
-    
+
     await loadDatabases()
     showDeleteDbDialog.value = false
     selectedDbsForDelete.value = []
+    messageType.value = 'success'
+    message.value = 'DB 删除成功'
   } catch (error: any) {
+    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
     console.error('删除DB失败:', error)
     messageType.value = 'error'
     message.value = `删除DB失败: ${error.message || error}`
