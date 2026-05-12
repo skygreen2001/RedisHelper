@@ -2,11 +2,30 @@
   <div class="server-config-container">
     <div class="header">
       <h2>服务器配置</h2>
-      <el-button type="primary" @click="showAddDialog = true">
-        <el-icon><Plus /></el-icon>
-        添加服务器
-      </el-button>
+      <div class="header-actions">
+        <el-button @click="exportConfig" :disabled="servers.length === 0">
+          <el-icon><Download /></el-icon>
+          导出配置
+        </el-button>
+        <el-button @click="importConfig">
+          <el-icon><Upload /></el-icon>
+          导入配置
+        </el-button>
+        <el-button type="primary" @click="showAddDialog = true">
+          <el-icon><Plus /></el-icon>
+          添加服务器
+        </el-button>
+      </div>
     </div>
+
+    <!-- 隐藏的文件输入框 -->
+    <input
+      ref="fileInput"
+      type="file"
+      accept=".json"
+      style="display: none"
+      @change="handleFileSelect"
+    />
 
     <div v-if="servers.length === 0" class="empty-state">
       <el-empty description="暂无服务器配置" />
@@ -158,10 +177,13 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Edit, Delete, Connection, Check, Close } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Connection, Check, Close, Download, Upload } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { isTauriEnv } from '../utils/tauri'
 
 const server = serverStore()
+const fileInput = ref<HTMLInputElement | null>(null)
 
 // 状态
 const showAddDialog = ref<boolean>(false)
@@ -288,6 +310,120 @@ const resetForm = () => {
   }
 }
 
+// 导出配置
+const exportConfig = async () => {
+  if (servers.value.length === 0) {
+    ElMessage.warning('没有可导出的服务器配置')
+    return
+  }
+
+  const configData = {
+    version: '1.0',
+    exportedAt: new Date().toISOString(),
+    servers: servers.value.map(s => ({
+      id: s.id,
+      name: s.name,
+      host: s.host,
+      port: s.port,
+      password: s.password,
+      db: s.db,
+      readonly: s.readonly
+    }))
+  }
+
+  const jsonStr = JSON.stringify(configData, null, 2)
+  const fileName = `redis-servers-${new Date().toISOString().slice(0, 10)}.json`
+
+  if (isTauriEnv()) {
+    // Tauri 环境：使用文件对话框保存
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog')
+      const filePath = await save({
+        title: '保存服务器配置',
+        defaultPath: fileName,
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      })
+      if (!filePath) return // 用户取消
+
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+      await writeTextFile(filePath, jsonStr)
+      ElMessage.success(`配置已导出到: ${filePath}`)
+    } catch (err: any) {
+      console.error('导出配置失败:', err)
+      ElMessage.error(`导出失败: ${err.message || err}`)
+    }
+  } else {
+    // 浏览器环境：下载文件
+    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('配置已导出')
+  }
+}
+
+// 导入配置
+const importConfig = () => {
+  fileInput.value?.click()
+}
+
+// 处理文件选择
+const handleFileSelect = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  try {
+    const text = await file.text()
+    const data = JSON.parse(text)
+
+    // 验证格式
+    if (!data.servers || !Array.isArray(data.servers)) {
+      throw new Error('无效的配置文件格式')
+    }
+
+    // 确认导入
+    const confirm = await ElMessageBox.confirm(
+      `即将导入 ${data.servers.length} 个服务器配置，是否继续？`,
+      '导入确认',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'info' }
+    ).catch(() => false)
+
+    if (!confirm) {
+      input.value = ''
+      return
+    }
+
+    // 导入配置
+    let imported = 0
+    for (const s of data.servers) {
+      try {
+        await server.addServer({
+          id: s.id,
+          name: s.name,
+          host: s.host,
+          port: s.port,
+          password: s.password,
+          db: s.db || 0,
+          readonly: s.readonly || false
+        })
+        imported++
+      } catch {
+        // 跳过已存在的配置
+      }
+    }
+
+    ElMessage.success(`成功导入 ${imported} 个服务器配置`)
+  } catch (err: any) {
+    ElMessage.error(`导入失败: ${err.message}`)
+  } finally {
+    input.value = ''
+  }
+}
+
 // 生命周期
 onMounted(async () => {
   await server.loadServers()
@@ -320,7 +456,12 @@ onMounted(async () => {
   font-weight: 600;
 }
 
-.header .el-button {
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.header-actions .el-button {
   padding: 8px 16px;
   border-radius: 4px;
   font-size: 14px;

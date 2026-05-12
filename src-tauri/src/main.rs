@@ -9,6 +9,7 @@ use tauri::Builder;
 fn main() {
     Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             commands::server::add_server,
             commands::server::edit_server,
