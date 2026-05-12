@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:proxy": "node server/ws-proxy.js & vite",
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -12,7 +13,8 @@
     "tauri:build": "tauri build",
     "tauri:build:mac": "tauri build --target universal-apple-darwin",
     "tauri:build:windows": "tauri build --target x86_64-pc-windows-gnu",
-    "tauri:build:all": "tauri build --target universal-apple-darwin && tauri build --target x86_64-pc-windows-gnu"
+    "tauri:build:all": "tauri build --target universal-apple-darwin && tauri build --target x86_64-pc-windows-gnu",
+    "proxy": "node server/ws-proxy.js"
   },
   "dependencies": {
     "@tauri-apps/plugin-dialog": "^2.7.0",
@@ -23,10 +25,12 @@
   "devDependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/cli": "^2.0.0",
-    "@vitejs/plugin-vue": "^4.5.2",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "ioredis": "^5.10.1",
     "typescript": "^5.2.2",
-    "vite": "^5.0.8",
-    "vue-tsc": "^2.2.12"
+    "vite": "^8.0.12",
+    "vue-tsc": "^2.2.12",
+    "ws": "^8.20.0"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-arm64-gnu": "^4.60.3"

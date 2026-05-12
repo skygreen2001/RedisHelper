@@ -589,25 +589,36 @@ import { redisStore } from '../stores/redisStore'
 import { trashStore } from '../stores/trashStore'
 import { ElMessageBox } from 'element-plus'
 import ServerConfigView from './ServerConfigView.vue'
-import { open } from '@tauri-apps/plugin-dialog'
-import { resolve } from '@tauri-apps/api/path'
+import { isTauriEnv } from '../utils/tauri'
 
 // 简化的 Tauri 环境检测
 function checkIsTauri(): boolean {
   try {
     if (typeof window === 'undefined') return false
     const win = window as any
-    // 只要有 Tauri 相关对象就认为是 Tauri 环境
-    return !!(win.__TAURI__ || win.__TAURI_IPC__)
+    // Tauri v2 使用 __TAURI_INTERNALS__ 而非 __TAURI__
+    return !!(win.__TAURI__ || win.__TAURI_INTERNALS__ || win.__TAURI_IPC__)
   } catch (e) {
     console.warn('Tauri检测失败:', e)
     return false
   }
 }
 
-// 调试模式 - 设为 true 可以看到环境信息
-const isDebugMode = true
-const isRunningInTauri = checkIsTauri()
+// 调试模式 - 开发环境自动开启，生产构建自动关闭
+const isDebugMode = import.meta.env.DEV
+const isRunningInTauri = ref(checkIsTauri())
+
+// Tauri 窗口加载后 __TAURI__ 对象才注入，需要轮询检测
+if (!isRunningInTauri.value) {
+  const timer = setInterval(() => {
+    if (checkIsTauri()) {
+      isRunningInTauri.value = true
+      clearInterval(timer)
+    }
+  }, 500)
+  // 最多检测 10 秒
+  setTimeout(() => clearInterval(timer), 10000)
+}
 
 const server = serverStore()
 const redis = redisStore()
@@ -1431,31 +1442,31 @@ const selectExportFolder = async () => {
   try {
     isFolderLoading.value = true
     
-    // 使用 Tauri 的 open dialog 选择文件夹
-    const selected = await open({
-      title: '选择保存文件夹',
-      directory: true,
-      multiple: false
-    })
-    
-    console.log('文件夹选择返回值:', selected, '类型:', typeof selected)
-    
-    if (selected !== null && selected !== undefined) {
-      let folderPath = ''
-      const selectedItems = selected as string | string[]
+    if (isTauriEnv()) {
+      // Tauri 环境：使用原生对话框
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        title: '选择保存文件夹',
+        directory: true,
+        multiple: false
+      })
       
-      if (typeof selectedItems === 'string') {
-        folderPath = selectedItems
-      } else if (Array.isArray(selectedItems) && selectedItems.length > 0) {
-        folderPath = selectedItems[0]
+      if (selected !== null && selected !== undefined) {
+        let folderPath = ''
+        const selectedItems = selected as string | string[]
+        if (typeof selectedItems === 'string') {
+          folderPath = selectedItems
+        } else if (Array.isArray(selectedItems) && selectedItems.length > 0) {
+          folderPath = selectedItems[0]
+        }
+        if (folderPath) {
+          exportFolderPath.value = folderPath
+        }
       }
-      
-      if (folderPath) {
-        exportFolderPath.value = folderPath
-        console.log('已设置保存路径:', exportFolderPath.value)
-      }
+    } else {
+      // 浏览器环境：导出时直接下载，无需选择文件夹
+      exportFolderPath.value = 'browser-download'
     }
-    // 用户取消选择时不做任何操作，保留之前的路径
   } catch (e) {
     console.error('文件夹选择错误:', e)
     messageType.value = 'error'
@@ -1489,23 +1500,59 @@ const handleExport = async () => {
     message.value = ''
     
     const fileName = exportFileName.value || 'redis-export'
-    const folderPath = exportFolderPath.value
     
-    // 拼接完整路径
-    const filePath = await resolve(folderPath, `${fileName}.json`)
-    console.log('完整导出路径:', filePath)
-    
-    await redis.exportData({
-      host: selectedServer.value.host,
-      port: selectedServer.value.port,
-      password: selectedServer.value.password,
-      db: selectedDb.value ?? 0,
-      file_path: filePath
-    })
-    
-    showExportDialog.value = false
-    messageType.value = 'success'
-    message.value = `导出成功: ${filePath}`
+    if (isTauriEnv()) {
+      // Tauri 环境：通过后端写入文件
+      const { resolve } = await import('@tauri-apps/api/path')
+      const filePath = await resolve(exportFolderPath.value, `${fileName}.json`)
+      
+      await redis.exportData({
+        host: selectedServer.value.host,
+        port: selectedServer.value.port,
+        password: selectedServer.value.password,
+        db: selectedDb.value ?? 0,
+        file_path: filePath
+      })
+      
+      showExportDialog.value = false
+      messageType.value = 'success'
+      message.value = `导出成功: ${filePath}`
+    } else {
+      // 浏览器环境：获取数据后下载为文件
+      const keys = await redis.getKeys({
+        host: selectedServer.value.host,
+        port: selectedServer.value.port,
+        password: selectedServer.value.password,
+        db: selectedDb.value ?? 0
+      })
+      
+      const data = []
+      for (const key of keys) {
+        try {
+          const result = await redis.getKeyValue({
+            host: selectedServer.value.host,
+            port: selectedServer.value.port,
+            password: selectedServer.value.password,
+            db: selectedDb.value ?? 0,
+            key
+          })
+          data.push({ key: result.key, value: result.value, type: result.key_type })
+        } catch { /* skip */ }
+      }
+      
+      const jsonStr = JSON.stringify(data, null, 2)
+      const blob = new Blob([jsonStr], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${fileName}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      
+      showExportDialog.value = false
+      messageType.value = 'success'
+      message.value = `导出成功: ${fileName}.json`
+    }
   } catch (error: any) {
     console.error('导出失败:', error)
     messageType.value = 'error'
@@ -1689,31 +1736,38 @@ const importData = async () => {
   try {
     message.value = ''
     
-    // 使用 Tauri dialog 选择要导入的文件
-    const selected = await open({
-      title: '选择导入文件',
-      multiple: false,
-      filters: [{ name: 'JSON', extensions: ['json'] }]
-    })
-    
-    if (!selected) return // 用户取消选择
-    
-    const filePath = typeof selected === 'string' ? selected : (Array.isArray(selected) ? selected[0] : '')
-    
-    if (!filePath) return
-    
-    await redis.importData({
-      host: selectedServer.value.host,
-      port: selectedServer.value.port,
-      password: selectedServer.value.password,
-      db: selectedDb.value ?? 0,
-      file_path: filePath
-    })
-    
-    await loadDatabases()
-    await loadKeys()
-    messageType.value = 'success'
-    message.value = `导入成功: ${filePath}`
+    if (isTauriEnv()) {
+      // Tauri 环境：使用原生对话框选择文件
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        title: '选择导入文件',
+        multiple: false,
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      })
+      
+      if (!selected) return
+      
+      const filePath = typeof selected === 'string' ? selected : (Array.isArray(selected) ? selected[0] : '')
+      if (!filePath) return
+      
+      await redis.importData({
+        host: selectedServer.value.host,
+        port: selectedServer.value.port,
+        password: selectedServer.value.password,
+        db: selectedDb.value ?? 0,
+        file_path: filePath
+      })
+      
+      await loadDatabases()
+      await loadKeys()
+      messageType.value = 'success'
+      message.value = `导入成功: ${filePath}`
+    } else {
+      // 浏览器环境：使用已有的 fileInput 元素
+      if (fileInput.value) {
+        fileInput.value.click()
+      }
+    }
   } catch (error: any) {
     console.error('导入失败:', error)
     messageType.value = 'error'

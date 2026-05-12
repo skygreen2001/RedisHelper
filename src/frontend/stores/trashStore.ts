@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { invoke } from '@tauri-apps/api/core'
+import { safeInvoke } from '../utils/tauri'
 
 interface MoveToTrashRequest {
   host: string
@@ -39,7 +39,7 @@ export const trashStore = defineStore('trash', {
   actions: {
     async moveToTrash(params: MoveToTrashRequest): Promise<boolean> {
       try {
-        return await invoke<boolean>('move_to_trash', { req: params })
+        return await safeInvoke<boolean>('move_to_trash', { req: params })
       } catch (error) {
         console.error('删除废键箱失败:', error)
         throw error
@@ -48,7 +48,7 @@ export const trashStore = defineStore('trash', {
 
     async batchMoveToTrash(params: BatchMoveToTrashRequest): Promise<number> {
       try {
-        return await invoke<number>('batch_move_to_trash', { req: params })
+        return await safeInvoke<number>('batch_move_to_trash', { req: params })
       } catch (error) {
         console.error('批量删除废键箱失败:', error)
         throw error
@@ -58,7 +58,7 @@ export const trashStore = defineStore('trash', {
     async getTrashItems(host: string, port: number): Promise<TrashItemResponse[]> {
       try {
         this.isLoading = true
-        const items = await invoke<TrashItemResponse[]>('get_trash_items', { host, port })
+        const items = await safeInvoke<TrashItemResponse[]>('get_trash_items', { host, port })
         this.trashItems = items
         return items
       } catch (error) {
@@ -71,7 +71,7 @@ export const trashStore = defineStore('trash', {
 
     async restoreFromTrash(trashId: string): Promise<boolean> {
       try {
-        return await invoke<boolean>('restore_from_trash', { req: { trash_id: trashId } })
+        return await safeInvoke<boolean>('restore_from_trash', { req: { trash_id: trashId } })
       } catch (error) {
         console.error('恢复键失败:', error)
         throw error
@@ -80,7 +80,7 @@ export const trashStore = defineStore('trash', {
 
     async batchRestoreFromTrash(trashIds: string[]): Promise<number> {
       try {
-        return await invoke<number>('batch_restore_from_trash', { req: { trash_ids: trashIds } })
+        return await safeInvoke<number>('batch_restore_from_trash', { req: { trash_ids: trashIds } })
       } catch (error) {
         console.error('批量恢复键失败:', error)
         throw error
@@ -89,7 +89,7 @@ export const trashStore = defineStore('trash', {
 
     async permanentDelete(trashIds: string[]): Promise<number> {
       try {
-        return await invoke<number>('permanent_delete_trash', { req: { trash_ids: trashIds } })
+        return await safeInvoke<number>('permanent_delete_trash', { req: { trash_ids: trashIds } })
       } catch (error) {
         console.error('永久删除失败:', error)
         throw error
@@ -98,7 +98,7 @@ export const trashStore = defineStore('trash', {
 
     async clearExpired(): Promise<number> {
       try {
-        return await invoke<number>('clear_expired_trash')
+        return await safeInvoke<number>('clear_expired_trash')
       } catch (error) {
         console.error('清理过期项失败:', error)
         throw error

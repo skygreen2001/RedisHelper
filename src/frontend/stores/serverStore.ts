@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { invoke } from '@tauri-apps/api/core'
+import { safeInvoke } from '../utils/tauri'
 
 interface Server {
   id: string
@@ -32,29 +32,8 @@ export const serverStore = defineStore('server', {
   actions: {
     async loadServers(): Promise<Server[]> {
       try {
-        const servers = await invoke<Server[]>('get_servers')
+        const servers = await safeInvoke<Server[]>('get_servers')
         this.servers = servers
-        
-        // // 检查是否已存在本地服务器配置
-        // const hasLocalServer = this.servers.some((server) => 
-        //   server.host === '127.0.0.1' && server.port === 6379
-        // )
-        
-        // // 如果不存在，添加本地服务器配置
-        // if (!hasLocalServer) {
-        //   const localServer = {
-        //     id: '1',
-        //     name: 'local',
-        //     host: '127.0.0.1',
-        //     port: 6379,
-        //     password: '',
-        //     db: 0,
-        //     created: new Date().toISOString(),
-        //     updated: new Date().toISOString()
-        //   }
-        //   await this.addServer(localServer)
-        // }
-
         return this.servers
       } catch (error) {
         console.error('加载服务器失败:', error)
@@ -72,7 +51,7 @@ export const serverStore = defineStore('server', {
       readonly?: boolean
     }): Promise<Server[]> {
       try {
-        this.servers = await invoke<Server[]>('add_server', {
+        this.servers = await safeInvoke<Server[]>('add_server', {
           config: server
         })
         return this.servers
@@ -92,7 +71,7 @@ export const serverStore = defineStore('server', {
       readonly?: boolean
     }): Promise<Server[]> {
       try {
-        this.servers = await invoke<Server[]>('edit_server', {
+        this.servers = await safeInvoke<Server[]>('edit_server', {
           config: server
         })
         return this.servers
@@ -104,7 +83,7 @@ export const serverStore = defineStore('server', {
     
     async deleteServer(id: string): Promise<Server[]> {
       try {
-        this.servers = await invoke<Server[]>('delete_server', {
+        this.servers = await safeInvoke<Server[]>('delete_server', {
           id
         })
         return this.servers
@@ -116,7 +95,7 @@ export const serverStore = defineStore('server', {
     
     async testConnection(params: TestConnectionRequest): Promise<TestConnectionResponse> {
       try {
-        return await invoke<TestConnectionResponse>('test_connection', {
+        return await safeInvoke<TestConnectionResponse>('test_connection', {
           req: params
         })
       } catch (error) {
