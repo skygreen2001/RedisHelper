@@ -4,12 +4,67 @@ mod commands;
 mod redis;
 mod storage;
 
-use tauri::Builder;
+use tauri::{Builder, menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder, AboutMetadata}};
 
 fn main() {
     Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            // 创建中文菜单
+            let menu = MenuBuilder::new(app)
+                .item(
+                    &SubmenuBuilder::new(app, "Redis小助手")
+                        .item(&PredefinedMenuItem::about(app, Some("关于"), Some(AboutMetadata {
+                            name: Some("Redis小助手".to_string()),
+                            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                            short_version: None,
+                            authors: None,
+                            comments: None,
+                            copyright: None,
+                            license: None,
+                            website: None,
+                            website_label: None,
+                            credits: None,
+                            icon: None,
+                        }))?)
+                        .separator()
+                        .item(&PredefinedMenuItem::hide(app, Some("隐藏"))?)
+                        .item(&PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?)
+                        .item(&PredefinedMenuItem::show_all(app, Some("显示全部"))?)
+                        .separator()
+                        .item(&PredefinedMenuItem::quit(app, Some("退出"))?)
+                        .build()?
+                )
+                .item(
+                    &SubmenuBuilder::new(app, "编辑")
+                        .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
+                        .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
+                        .separator()
+                        .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
+                        .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
+                        .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
+                        .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
+                        .build()?
+                )
+                .item(
+                    &SubmenuBuilder::new(app, "窗口")
+                        .item(&PredefinedMenuItem::minimize(app, Some("最小化"))?)
+                        .item(&PredefinedMenuItem::close_window(app, Some("关闭窗口"))?)
+                        .separator()
+                        .item(&PredefinedMenuItem::fullscreen(app, Some("全屏"))?)
+                        .build()?
+                )
+                .item(
+                    &SubmenuBuilder::new(app, "帮助")
+                        .item(&MenuItemBuilder::new("关于").id("about").build(app)?)
+                        .build()?
+                )
+                .build()?;
+
+            app.set_menu(menu)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::server::add_server,
             commands::server::edit_server,
