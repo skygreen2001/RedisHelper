@@ -1,5 +1,8 @@
 <template>
   <div class="main-container">
+    <!-- 标签栏（最顶部） -->
+    <TabBar />
+
     <!-- 消息提示 -->
     <el-alert
       v-if="message"
@@ -7,7 +10,7 @@
       :type="messageType"
       show-icon
       :closable="true"
-      @close="message = ''"
+      @close="sessionManager.active.message = ''"
       class="message-alert"
     />
 
@@ -16,7 +19,7 @@
       <div class="menu-left">
         <el-dropdown @command="handleDeviceCommand">
           <span class="el-dropdown-link">
-            连接 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            {{ selectedServer?.name || '连接' }} <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </span>
           <template #dropdown>
             <el-dropdown-menu>
@@ -35,7 +38,7 @@
         </el-dropdown>
         <el-dropdown @command="handleDbCommand">
           <span class="el-dropdown-link">
-            DB <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            DB{{ selectedDb !== null ? ' ' + selectedDb : '' }} <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </span>
           <template #dropdown>
             <el-dropdown-menu>
@@ -144,11 +147,11 @@
               <el-icon><Refresh /></el-icon>
             </el-button>
             <el-input
-              v-model="searchPattern"
+              v-model="sessionManager.active.searchPattern"
               :placeholder="searchPlaceholder"
               clearable
               @keyup.enter="searchKeys"
-              @clear="searchPattern = ''; message = ''"
+              @clear="sessionManager.active.searchPattern = ''; sessionManager.active.message = ''"
               class="search-input"
             />
             <el-dropdown @command="handleSearchOptionCommand" class="search-options-dropdown">
@@ -180,7 +183,7 @@
               <el-button
                 type="success"
                 size="small"
-                @click="showAddKeyDialog = true"
+                @click="sessionManager.active.showAddKeyDialog = true"
                 class="add-key-btn"
               >
                 <el-icon><Plus /></el-icon>
@@ -306,7 +309,7 @@
           </div>
           <div class="value-content">
             <el-input
-              v-model="editKeyForm.value"
+              v-model="sessionManager.active.editKeyForm.value"
               type="textarea"
               :rows="10"
               placeholder="请输入值"
@@ -375,17 +378,17 @@
 
     <!-- 添加键对话框 -->
     <el-dialog
-      v-model="showAddKeyDialog"
+      v-model="sessionManager.active.showAddKeyDialog"
       title="添加键"
       width="500px"
       custom-class="bounce-dialog"
     >
       <el-form :model="newKeyForm" label-width="80px">
         <el-form-item label="键名" required>
-          <el-input v-model="newKeyForm.key" placeholder="输入键名" />
+          <el-input v-model="sessionManager.active.newKeyForm.key" placeholder="输入键名" />
         </el-form-item>
         <el-form-item label="类型" required>
-          <el-radio-group v-model="newKeyForm.type" size="default">
+          <el-radio-group v-model="sessionManager.active.newKeyForm.type" size="default">
             <el-radio-button label="string">String</el-radio-button>
             <el-radio-button label="list">List</el-radio-button>
             <el-radio-button label="set">Set</el-radio-button>
@@ -395,7 +398,7 @@
         </el-form-item>
         <el-form-item label="值" required>
           <el-input
-            v-model="newKeyForm.value"
+            v-model="sessionManager.active.newKeyForm.value"
             type="textarea"
             :rows="4"
             :placeholder="typePlaceholders[newKeyForm.type]"
@@ -408,7 +411,7 @@
       </el-form>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="showAddKeyDialog = false">取消</el-button>
+          <el-button @click="sessionManager.active.showAddKeyDialog = false">取消</el-button>
           <el-button type="primary" @click="addKey">确定</el-button>
         </span>
       </template>
@@ -416,24 +419,24 @@
 
     <!-- 编辑键对话框 -->
     <el-dialog
-      v-model="showEditKeyDialog"
+      v-model="sessionManager.active.showEditKeyDialog"
       title="修改键"
       width="500px"
     >
       <el-form :model="editKeyForm" label-width="80px">
         <el-form-item label="键名" required>
-          <el-input v-model="editKeyForm.key" disabled />
+          <el-input v-model="sessionManager.active.editKeyForm.key" disabled />
         </el-form-item>
         <el-form-item label="值" required>
           <el-input
-            v-model="editKeyForm.value"
+            v-model="sessionManager.active.editKeyForm.value"
             type="textarea"
             :rows="4"
             placeholder="输入值"
           />
         </el-form-item>
         <el-form-item label="类型" required>
-          <el-select v-model="editKeyForm.type" placeholder="选择类型">
+          <el-select v-model="sessionManager.active.editKeyForm.type" placeholder="选择类型">
             <el-option label="String" value="string" />
             <el-option label="List" value="list" />
             <el-option label="Set" value="set" />
@@ -444,7 +447,7 @@
       </el-form>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="showEditKeyDialog = false">取消</el-button>
+          <el-button @click="sessionManager.active.showEditKeyDialog = false">取消</el-button>
           <el-button type="primary" @click="updateKey">确定</el-button>
         </span>
       </template>
@@ -452,7 +455,7 @@
 
     <!-- 服务器配置页面 -->
     <el-dialog
-      v-model="showServerConfig"
+      v-model="sessionManager.active.showServerConfig"
       title="服务器配置"
       width="800px"
       height="80vh"
@@ -468,18 +471,18 @@
 
     <!-- 新增DB对话框 -->
     <el-dialog
-      v-model="showAddDbDialog"
+      v-model="sessionManager.active.showAddDbDialog"
       title="新增DB"
       width="400px"
     >
       <el-form :model="{ db: newDbNumber }" label-width="80px">
         <el-form-item label="DB编号" required>
-          <el-input-number v-model="newDbNumber" :min="0" :max="15" />
+          <el-input-number v-model="sessionManager.active.newDbNumber" :min="0" :max="15" />
         </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="showAddDbDialog = false">取消</el-button>
+          <el-button @click="sessionManager.active.showAddDbDialog = false">取消</el-button>
           <el-button type="primary" @click="addDb">确定</el-button>
         </span>
       </template>
@@ -487,7 +490,7 @@
 
     <!-- 删除DB对话框 -->
     <el-dialog
-      v-model="showDeleteDbDialog"
+      v-model="sessionManager.active.showDeleteDbDialog"
       title="删除DB"
       width="400px"
     >
@@ -507,7 +510,7 @@
       </div>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="showDeleteDbDialog = false">取消</el-button>
+          <el-button @click="sessionManager.active.showDeleteDbDialog = false">取消</el-button>
           <el-button type="danger" @click="deleteDb" :disabled="selectedDbsForDelete.length === 0">
             删除
           </el-button>
@@ -517,7 +520,7 @@
 
     <!-- 导出对话框 -->
     <el-dialog
-      v-model="showExportDialog"
+      v-model="sessionManager.active.showExportDialog"
       title="导出数据"
       width="480px"
     >
@@ -526,7 +529,7 @@
           <el-form-item label="保存位置">
             <div class="folder-select-row">
               <el-input
-                v-model="exportFolderPath"
+                v-model="sessionManager.active.exportFolderPath"
                 placeholder="点击右侧按钮选择文件夹"
                 readonly
                 class="folder-path-input"
@@ -543,7 +546,7 @@
           </el-form-item>
           <el-form-item label="文件名">
             <el-input
-              v-model="exportFileName"
+              v-model="sessionManager.active.exportFileName"
               placeholder="请输入导出文件名（不含扩展名）"
             />
           </el-form-item>
@@ -551,7 +554,7 @@
       </div>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="showExportDialog = false">取消</el-button>
+          <el-button @click="sessionManager.active.showExportDialog = false">取消</el-button>
           <el-button type="primary" @click="handleExport" :disabled="!exportFolderPath">
             导出
           </el-button>
@@ -561,7 +564,7 @@
     
     <!-- 清空确认对话框 -->
     <el-dialog
-      v-model="showFlushDialog"
+      v-model="sessionManager.active.showFlushDialog"
       title="确认清空"
       width="400px"
     >
@@ -571,7 +574,7 @@
       </div>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="showFlushDialog = false">取消</el-button>
+          <el-button @click="sessionManager.active.showFlushDialog = false">取消</el-button>
           <el-button type="danger" @click="handleFlush">
             确认清空
           </el-button>
@@ -589,6 +592,8 @@ import { redisStore } from '../stores/redisStore'
 import { trashStore } from '../stores/trashStore'
 import { ElMessageBox } from 'element-plus'
 import ServerConfigView from './ServerConfigView.vue'
+import TabBar from '../components/TabBar.vue'
+import { sessionManager } from '../sessions/SessionManager'
 import { isTauriEnv } from '../utils/tauri'
 
 // 简化的 Tauri 环境检测
@@ -625,21 +630,16 @@ const redis = redisStore()
 const trash = trashStore()
 
 // 状态
-const selectedServer = ref<any>(null)
-const selectedDb = ref<number | null>(null)
-const databases = ref<Array<[number, number]>>([])
-// 前端跟踪的新增数据库（空数据库）
-const newlyCreatedDbs = ref<Set<number>>(new Set())
-// 记录所有曾经访问过（选中过）的 DB，即使变空也保留在列表中
-const visitedDbs = ref<Set<number>>(new Set())
-const keys = ref<string[]>([])
-const sortOrder = ref<'none' | 'asc' | 'desc'>('none')
+const selectedServer = computed(() => sessionManager.active?.selectedServer ?? null)
+const selectedDb = computed(() => sessionManager.active?.selectedDb)
+const databases = computed(() => sessionManager.active?.databases || [])
+const keys = computed(() => sessionManager.active?.keys || [])
 
 // 排序后的 keys
 const sortedKeys = computed(() => {
-  if (sortOrder.value === 'asc') {
+  if (sessionManager.active.sortOrder === 'asc') {
     return [...keys.value].sort((a, b) => a.localeCompare(b))
-  } else if (sortOrder.value === 'desc') {
+  } else if (sessionManager.active.sortOrder === 'desc') {
     return [...keys.value].sort((a, b) => b.localeCompare(a))
   }
   return keys.value
@@ -666,60 +666,53 @@ const searchPlaceholder = computed(() => {
 
 // 处理搜索选项命令
 const handleSearchOptionCommand = (command: string) => {
+  const session = sessionManager.active
   if (command === 'toggleCaseSensitive') {
-    caseSensitive.value = !caseSensitive.value
+    session.caseSensitive = !session.caseSensitive
   } else if (command === 'toggleSearchAll') {
-    searchAll.value = !searchAll.value
+    session.searchAll = !session.searchAll
   }
 }
 
 // 处理排序命令
 const handleSortCommand = (command: string) => {
-  if (command === sortOrder.value) {
+  const session = sessionManager.active
+  if (command === session.sortOrder) {
     // 再次点击同一排序，取消排序
-    sortOrder.value = 'none'
+    session.sortOrder = 'none'
   } else {
-    sortOrder.value = command as 'asc' | 'desc'
+    session.sortOrder = command as 'asc' | 'desc'
   }
 }
 
 // ========== 搜索选项状态 ==========
-const caseSensitive = ref<boolean>(false) // 默认不区分大小写
-const searchAll = ref<boolean>(true)      // 默认搜索全部
+const caseSensitive = computed(() => sessionManager.active?.caseSensitive)
+const searchAll = computed(() => sessionManager.active?.searchAll)
 
 // ========== 分页加载相关状态 ==========
-const keysCursor = ref<number>(0)         // SCAN 游标
-const keysTotal = ref<number>(0)          // 总数量
-const isLoadingMore = ref<boolean>(false) // 加载更多中
-const isLoadingAll = ref<boolean>(false)  // 加载所有中
+const keysCursor = computed(() => sessionManager.active?.keysCursor)
+const keysTotal = computed(() => sessionManager.active?.keysTotal)
+const isLoadingMore = computed(() => sessionManager.active?.isLoadingMore)
+const isLoadingAll = computed(() => sessionManager.active?.isLoadingAll)
 const loadedCount = computed(() => keys.value.length)
 const hasMoreKeys = computed(() => keysCursor.value !== 0 || loadedCount.value < keysTotal.value)
 // ====================================
 
 // 消息提示相关
-const message = ref<string>('')
-const messageType = ref<'success' | 'error'>('error')
-const selectedKey = ref<string>('')
-const keyValue = ref<string>('')
-const keyType = ref<string>('')
-const searchPattern = ref<string>('')
-const showAddKeyDialog = ref<boolean>(false)
-const showEditKeyDialog = ref<boolean>(false)
-const showServerConfig = ref<boolean>(false)
-const showAddDbDialog = ref<boolean>(false)
-const showDeleteDbDialog = ref<boolean>(false)
-const selectedDbsForDelete = ref<number[]>([])
-const newDbNumber = ref<number>(0)
+const message = computed(() => sessionManager.active?.message)
+const messageType = computed(() => sessionManager.active?.messageType)
+const selectedKey = computed(() => sessionManager.active?.selectedKey)
+const keyType = computed(() => sessionManager.active?.keyType)
+const searchPattern = computed(() => sessionManager.active?.searchPattern)
+const selectedDbsForDelete = computed(() => sessionManager.active?.selectedDbsForDelete)
+const newDbNumber = computed(() => sessionManager.active?.newDbNumber)
 // 导出配置
-const showExportDialog = ref<boolean>(false)
-const exportFileName = ref<string>('redis-export')
-const exportFolderPath = ref<string>('/tmp')
-const isFolderLoading = ref<boolean>(false)
+const exportFolderPath = computed(() => sessionManager.active?.exportFolderPath)
+const isFolderLoading = computed(() => sessionManager.active?.isFolderLoading)
 // 清空配置
-const showFlushDialog = ref<boolean>(false)
 // 多选模式
-const isMultiSelectMode = ref<boolean>(false)
-const selectedKeys = ref<string[]>([])
+const isMultiSelectMode = computed(() => sessionManager.active?.isMultiSelectMode)
+const selectedKeys = computed(() => sessionManager.active?.selectedKeys)
 const treeRef = ref<any>(null)
 // 多选面板折叠状态（记住用户偏好）
 const MULTI_SELECT_PANEL_KEY = 'redis-helper-multi-select-panel'
@@ -731,8 +724,8 @@ watch(isMultiSelectPanelExpanded, (val) => {
   localStorage.setItem(MULTI_SELECT_PANEL_KEY, String(val))
 })
 // 废键箱视图
-const isTrashView = ref<boolean>(false)
-const trashSelectedIds = ref<string[]>([])
+const isTrashView = computed(() => sessionManager.active?.isTrashView)
+const trashSelectedIds = computed(() => sessionManager.active?.trashSelectedIds)
 
 // 是否显示 key-list-footer（多选面板、加载进度、加载按钮）
 const showKeyListFooter = computed(() => {
@@ -753,9 +746,9 @@ const showKeyListFooter = computed(() => {
 const toggleDbSelection = (db: number) => {
   const index = selectedDbsForDelete.value.indexOf(db)
   if (index === -1) {
-    selectedDbsForDelete.value.push(db)
+    sessionManager.active.selectedDbsForDelete.push(db)
   } else {
-    selectedDbsForDelete.value.splice(index, 1)
+    sessionManager.active.selectedDbsForDelete.splice(index, 1)
   }
 }
 
@@ -763,9 +756,9 @@ const toggleDbSelection = (db: number) => {
 const handleDeviceCommand = (command: any) => {
   if (command === 'settings') {
     // 显示服务器配置页面
-    showServerConfig.value = true
+    sessionManager.active.showServerConfig = true
   } else if (command.type === 'select') {
-    selectedServer.value = command.server
+    sessionManager.active.selectedServer = command.server
     handleServerChange()
   }
 }
@@ -774,22 +767,23 @@ const handleDeviceCommand = (command: any) => {
 const handleDbCommand = async (command: any) => {
   if (command === 'add') {
     // 新增DB逻辑
-    showAddDbDialog.value = true
+    sessionManager.active.showAddDbDialog = true
   } else if (command === 'delete') {
     // 删除DB逻辑 - 只读模式下禁止
     if (isCurrentServerReadonly.value) {
-      messageType.value = 'error'
-      message.value = '当前服务器为只读模式，无法删除DB'
+      sessionManager.active.messageType = 'error'
+      sessionManager.active.message = '当前服务器为只读模式，无法删除DB'
       return
     }
-    showDeleteDbDialog.value = true
+    sessionManager.active.showDeleteDbDialog = true
   } else if (command === 'trash') {
-    isTrashView.value = true
+    sessionManager.active.isTrashView = true
     await loadTrashItems()
   } else if (command.type === 'select') {
-    selectedDb.value = command.db
-    visitedDbs.value.add(command.db)
-    isTrashView.value = false
+    sessionManager.active.selectedDb = command.db
+    sessionManager.active.visitedDbs.add(command.db)
+    sessionManager.active.isTrashView = false
+    sessionManager.active.updateTitle()
     handleDbChange()
   }
 }
@@ -797,7 +791,7 @@ const handleDbCommand = async (command: any) => {
 // 处理刷新操作
 const handleRefresh = async () => {
   // 清空搜索框
-  searchPattern.value = ''
+  sessionManager.active.searchPattern = ''
   // 重新加载键列表（重置分页状态）
   await loadKeys(true)
 }
@@ -806,7 +800,7 @@ const handleRefresh = async () => {
 const handleActionCommand = (command: string) => {
   switch (command) {
     case 'add':
-      showAddKeyDialog.value = true
+      sessionManager.active.showAddKeyDialog = true
       break
     case 'import':
       importData()
@@ -816,11 +810,11 @@ const handleActionCommand = (command: string) => {
       break
     case 'flush':
       if (isCurrentServerReadonly.value) {
-        messageType.value = 'error'
-        message.value = '当前服务器为只读模式，无法清空数据库'
+        sessionManager.active.messageType = 'error'
+        sessionManager.active.message = '当前服务器为只读模式，无法清空数据库'
         break
       }
-      showFlushDialog.value = true
+      sessionManager.active.showFlushDialog = true
       break
     case 'generateTestData':
       handleGenerateTestData()
@@ -830,50 +824,55 @@ const handleActionCommand = (command: string) => {
 
 // 生成测试数据
 const handleGenerateTestData = async () => {
-  if (!selectedServer.value || selectedDb.value === null) return
+  const server = selectedServer.value
+  const db = selectedDb.value
+  if (!server || db === null) return
 
   try {
     await ElMessageBox.confirm(
-      `确定要在当前数据库(DB ${selectedDb.value})生成100个测试键吗？`,
+      `确定要在当前数据库(DB ${db})生成100个测试键吗？`,
       '生成测试数据',
       { confirmButtonText: '确认生成', cancelButtonText: '取消', type: 'info' }
     )
 
-    message.value = ''
+    sessionManager.active.message = ''
     await redis.generateTestData({
-      host: selectedServer.value.host,
-      port: selectedServer.value.port,
-      password: selectedServer.value.password,
-      db: selectedDb.value
+      host: server.host,
+      port: server.port,
+      password: server.password,
+      db
     }, 100)
 
     await loadKeys()
     await loadDatabases()
 
-    messageType.value = 'success'
-    message.value = '已生成100个测试键'
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '已生成100个测试键'
   } catch (error: any) {
     if (error === 'cancel' || error?.toString?.().includes('cancel')) return
-    messageType.value = 'error'
-    message.value = `生成测试数据失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `生成测试数据失败: ${error.message || error}`
   }
 }
 
 const handleFlush = async () => {
-  if (!selectedServer.value || selectedDb.value === null) return
+  const server = selectedServer.value
+  const db = selectedDb.value
+  if (!server || db === null) return
 
   try {
     // 安全验证：要求输入服务器名称确认
+    const serverName = server.name
     await ElMessageBox.prompt(
-      `此操作将清空 DB ${selectedDb.value} 中的所有数据，不可恢复！\n\n请输入当前服务器名称 【${selectedServer.value.name}】 以确认操作：`,
+      `此操作将清空 DB ${selectedDb.value} 中的所有数据，不可恢复！\n\n请输入当前服务器名称 【${serverName}】 以确认操作：`,
       '清空数据库 - 安全验证',
       {
         confirmButtonText: '确认清空',
         cancelButtonText: '取消',
         type: 'warning',
-        inputPlaceholder: `请输入 ${selectedServer.value.name}`,
+        inputPlaceholder: `请输入 ${serverName}`,
         inputValidator: (val: string) => {
-          if (!val || val.trim().toLowerCase() !== selectedServer.value.name.trim().toLowerCase()) {
+          if (!val || val.trim().toLowerCase() !== serverName.trim().toLowerCase()) {
             return '服务器名称不匹配，请重新输入'
           }
           return true
@@ -881,35 +880,33 @@ const handleFlush = async () => {
       }
     )
 
-    message.value = ''
-    const flushedDb = selectedDb.value // 暂存当前DB编号，清空后后端不会返回它
+    sessionManager.active.message = ''
+    const flushedDb = db // 暂存当前DB编号，清空后后端不会返回它
 
     await redis.flushDatabase({
-      host: selectedServer.value.host,
-      port: selectedServer.value.port,
-      password: selectedServer.value.password,
-      db: selectedDb.value
+      host: server.host,
+      port: server.port,
+      password: server.password,
+      db
     })
 
-    showFlushDialog.value = false
+    sessionManager.active.showFlushDialog = false
 
-    selectedKey.value = ''
-    keyValue.value = ''
-    keyType.value = ''
+    sessionManager.active.clearKeyDetail()
 
     // 刷新DB列表，同时确保清空的DB仍然显示（计数为0）
-    newlyCreatedDbs.value.add(flushedDb)
+    sessionManager.active.newlyCreatedDbs.add(flushedDb)
     await loadDatabases()
     await loadKeys()
 
-    messageType.value = 'success'
-    message.value = '数据库清空成功'
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '数据库清空成功'
   } catch (error: any) {
     if (error === 'cancel' || error?.toString?.().includes('cancel')) return
     console.error('清空失败:', error)
-    showFlushDialog.value = false
-    messageType.value = 'error'
-    message.value = `清空失败: ${error.message || error}`
+    sessionManager.active.showFlushDialog = false
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `清空失败: ${error.message || error}`
   }
 }
 
@@ -931,21 +928,13 @@ const typeExamples: Record<string, string> = {
 }
 
 // 表单数据
-const newKeyForm = ref({
-  key: '',
-  value: '',
-  type: 'string'
-})
+const newKeyForm = computed(() => sessionManager.active?.newKeyForm)
 
-const editKeyForm = ref({
-  key: '',
-  value: '',
-  type: 'string'
-})
+const editKeyForm = computed(() => sessionManager.active?.editKeyForm)
 
 // 计算属性
 const servers = computed(() => server.servers)
-const isCurrentServerReadonly = computed(() => selectedServer.value?.readonly === true)
+const isCurrentServerReadonly = computed(() => sessionManager.active?.selectedServer?.readonly === true)
 const keyTree = computed(() => {
   return filteredKeys.value.map(key => ({
     id: key,
@@ -957,21 +946,22 @@ const keyTree = computed(() => {
 
 // 方法
 const handleServerChange = async () => {
+  const session = sessionManager.active
   // 切换服务器时退出多选模式
-  if (isMultiSelectMode.value) {
-    isMultiSelectMode.value = false
-    clearSelection()
+  if (session.isMultiSelectMode) {
+    session.clearSelection()
   }
-  if (selectedServer.value) {
+  if (session.selectedServer) {
+    session.updateTitle()
     await loadDatabases()
   }
 }
 
 const handleDbChange = async () => {
+  const session = sessionManager.active
   // 切换 DB 时退出多选模式
-  if (isMultiSelectMode.value) {
-    isMultiSelectMode.value = false
-    clearSelection()
+  if (session.isMultiSelectMode) {
+    session.clearSelection()
   }
   // 切换 DB 时重置分页状态
   await loadKeys(true)
@@ -981,7 +971,7 @@ const loadDatabases = async () => {
   if (!selectedServer.value) return
   
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     const backendDatabases = await redis.getDatabases({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
@@ -994,17 +984,17 @@ const loadDatabases = async () => {
     const mergedDbs = [...backendDatabases]
 
     // 添加前端跟踪的新增数据库（如果后端还没有返回）
-    newlyCreatedDbs.value.forEach(dbNum => {
+    sessionManager.active.newlyCreatedDbs.forEach(dbNum => {
       if (!backendDbs.has(dbNum)) {
         mergedDbs.push([dbNum, 0])
       } else {
-        newlyCreatedDbs.value.delete(dbNum)
+        sessionManager.active.newlyCreatedDbs.delete(dbNum)
       }
     })
 
     // 添加曾经访问过但已变空的数据库
-    visitedDbs.value.forEach(dbNum => {
-      if (!backendDbs.has(dbNum) && !newlyCreatedDbs.value.has(dbNum)) {
+    sessionManager.active.visitedDbs.forEach(dbNum => {
+      if (!backendDbs.has(dbNum) && !sessionManager.active.newlyCreatedDbs.has(dbNum)) {
         mergedDbs.push([dbNum, 0])
       }
     })
@@ -1012,17 +1002,18 @@ const loadDatabases = async () => {
     // 按数据库编号排序
     mergedDbs.sort((a, b) => a[0] - b[0])
     
-    databases.value = mergedDbs
+    sessionManager.active.databases = mergedDbs
     
-    if (databases.value.length > 0 && !selectedDb.value) {
-      selectedDb.value = databases.value[0][0]
-      visitedDbs.value.add(selectedDb.value)
+    if (mergedDbs.length > 0 && sessionManager.active.selectedDb == null) {
+      const firstDb = mergedDbs[0][0]
+      sessionManager.active.selectedDb = firstDb
+      sessionManager.active.visitedDbs.add(firstDb)
       await loadKeys()
     }
   } catch (error: any) {
     console.error('加载数据库失败:', error)
-    messageType.value = 'error'
-    message.value = `加载数据库失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `加载数据库失败: ${error.message || error}`
   }
 }
 
@@ -1030,12 +1021,12 @@ const loadKeys = async (reset: boolean = true) => {
   if (!selectedServer.value) return
 
   try {
-    message.value = ''
+    sessionManager.active.message = ''
 
     if (reset) {
       // 重置状态，首次加载
-      keys.value = []
-      keysCursor.value = 0
+      sessionManager.active.keys = []
+      sessionManager.active.keysCursor = 0
     }
 
     // 模拟分页加载 - 每次加载100个
@@ -1051,29 +1042,29 @@ const loadKeys = async (reset: boolean = true) => {
     })
 
     // 设置总数
-    keysTotal.value = allKeys.length
+    sessionManager.active.keysTotal = allKeys.length
 
     // 如果是首次加载，只取前100个
     if (reset) {
-      keys.value = allKeys.slice(0, pageSize)
+      sessionManager.active.keys = allKeys.slice(0, pageSize)
       if (allKeys.length > pageSize) {
-        keysCursor.value = pageSize // 标记还有更多
+        sessionManager.active.keysCursor = pageSize // 标记还有更多
       } else {
-        keysCursor.value = 0 // 没有更多了
+        sessionManager.active.keysCursor = 0 // 没有更多了
       }
     } else {
       // 追加加载
-      keys.value = allKeys
-      keysCursor.value = 0
+      sessionManager.active.keys = allKeys
+      sessionManager.active.keysCursor = 0
     }
 
-    selectedKey.value = ''
-    keyValue.value = ''
-    keyType.value = ''
+    sessionManager.active.selectedKey = ''
+    sessionManager.active.keyValue = ''
+    sessionManager.active.keyType = ''
   } catch (error: any) {
     console.error('加载键失败:', error)
-    messageType.value = 'error'
-    message.value = `加载键失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `加载键失败: ${error.message || error}`
   }
 }
 
@@ -1081,7 +1072,7 @@ const loadKeys = async (reset: boolean = true) => {
 const handleLoadMore = async () => {
   if (!selectedServer.value || isLoadingMore.value) return
 
-  isLoadingMore.value = true
+  sessionManager.active.isLoadingMore = true
   const startTime = Date.now()
   try {
     const pageSize = 100
@@ -1102,13 +1093,13 @@ const handleLoadMore = async () => {
     if (remaining > 0) {
       // 加载下一批（最多 pageSize 个）
       const nextBatch = allKeys.slice(currentLength, currentLength + pageSize)
-      keys.value = [...keys.value, ...nextBatch]
+      sessionManager.active.keys = [...keys.value, ...nextBatch]
 
       // 更新游标
       if (currentLength + pageSize < allKeys.length) {
-        keysCursor.value = currentLength + pageSize
+        sessionManager.active.keysCursor = currentLength + pageSize
       } else {
-        keysCursor.value = 0 // 没有更多了
+        sessionManager.active.keysCursor = 0 // 没有更多了
       }
 
       // 等待 DOM 更新后滚动到新内容
@@ -1134,10 +1125,10 @@ const handleLoadMore = async () => {
     }
   } catch (error: any) {
     console.error('加载更多失败:', error)
-    messageType.value = 'error'
-    message.value = `加载更多失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `加载更多失败: ${error.message || error}`
   } finally {
-    isLoadingMore.value = false
+    sessionManager.active.isLoadingMore = false
   }
 }
 
@@ -1145,7 +1136,7 @@ const handleLoadMore = async () => {
 const handleLoadAll = async () => {
   if (!selectedServer.value || isLoadingAll.value) return
 
-  isLoadingAll.value = true
+  sessionManager.active.isLoadingAll = true
   try {
     // 先获取所有 keys 用于计算总数
     const allKeys = await redis.getKeys({
@@ -1155,24 +1146,24 @@ const handleLoadAll = async () => {
       db: selectedDb.value ?? 0
     })
 
-    keysTotal.value = allKeys.length
+    sessionManager.active.keysTotal = allKeys.length
     const total = allKeys.length
     const batchSize = 100 // 每批加载 100 个
 
     // 如果总数较少，直接显示
     if (total <= batchSize) {
-      keys.value = allKeys
-      keysCursor.value = 0
-      messageType.value = 'success'
-      message.value = `已加载全部 ${total} 个 keys`
+      sessionManager.active.keys = allKeys
+      sessionManager.active.keysCursor = 0
+      sessionManager.active.messageType = 'success'
+      sessionManager.active.message = `已加载全部 ${total} 个 keys`
       return
     }
 
     // 分批逐步加载，营造真实进度感
-    keys.value = []
+    sessionManager.active.keys = []
     for (let i = 0; i < total; i += batchSize) {
       const batch = allKeys.slice(i, i + batchSize)
-      keys.value = [...keys.value, ...batch]
+      sessionManager.active.keys = [...keys.value, ...batch]
 
       // 等待 Vue 更新 DOM，确保进度条渲染
       await nextTick()
@@ -1180,21 +1171,21 @@ const handleLoadAll = async () => {
       await new Promise(resolve => setTimeout(resolve, 80))
     }
 
-    keysCursor.value = 0 // 没有更多了
+    sessionManager.active.keysCursor = 0 // 没有更多了
 
-    messageType.value = 'success'
-    message.value = `已加载全部 ${total} 个 keys`
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = `已加载全部 ${total} 个 keys`
   } catch (error: any) {
     console.error('加载所有失败:', error)
-    messageType.value = 'error'
-    message.value = `加载所有失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `加载所有失败: ${error.message || error}`
   } finally {
-    isLoadingAll.value = false
+    sessionManager.active.isLoadingAll = false
   }
 }
 
 const handleKeyClick = async (node: any) => {
-  selectedKey.value = node.id
+  sessionManager.active.selectedKey = node.id
   await loadKeyValue(node.id)
 }
 
@@ -1202,7 +1193,7 @@ const loadKeyValue = async (key: string) => {
   if (!selectedServer.value) return
   
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     const result = await redis.getKeyValue({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
@@ -1210,16 +1201,18 @@ const loadKeyValue = async (key: string) => {
       db: selectedDb.value ?? 0,
       key
     })
-    keyValue.value = result.value
-    keyType.value = result.key_type
+    sessionManager.active.keyValue = result.value
+    sessionManager.active.keyType = result.key_type
     // 格式化显示JSON，其他类型保持原样
-    editKeyForm.value.key = key
-    editKeyForm.value.value = formatJsonDisplay(result.value)
-    editKeyForm.value.type = result.key_type
+    sessionManager.active.editKeyForm = {
+      key: key,
+      value: formatJsonDisplay(result.value),
+      type: result.key_type
+    }
   } catch (error: any) {
     console.error('加载键值失败:', error)
-    messageType.value = 'error'
-    message.value = `加载键值失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `加载键值失败: ${error.message || error}`
   }
 }
 
@@ -1252,7 +1245,7 @@ const searchKeys = async () => {
   if (!hasWildcard) {
     // 客户端过滤 —— filteredKeys 已自动响应 searchPattern 变化，无需手动操作
     // 如果需要搜索全部且未全部加载，先加载全部
-    if (searchAll.value && keysCursor.value !== 0 && input) {
+    if (sessionManager.active.searchAll && keysCursor.value !== 0 && input) {
       await handleLoadAll()
     }
     return
@@ -1260,7 +1253,7 @@ const searchKeys = async () => {
 
   // 含通配符 → 走后端
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     const result = await redis.searchKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
@@ -1271,16 +1264,16 @@ const searchKeys = async () => {
 
     // 后端结果再做一次客户端不区分大小写过滤（兜底）
     const lower = input.replace(/[*?\[]/g, '').toLowerCase()
-    keys.value = lower
+    sessionManager.active.keys = lower
       ? result.filter(k => k.toLowerCase().includes(lower))
       : result
 
-    keysCursor.value = 0
-    keysTotal.value = keys.value.length
+    sessionManager.active.keysCursor = 0
+    sessionManager.active.keysTotal = keys.value.length
   } catch (error: any) {
     console.error('搜索键失败:', error)
-    messageType.value = 'error'
-    message.value = `搜索键失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `搜索键失败: ${error.message || error}`
   }
 }
 
@@ -1352,7 +1345,7 @@ const addKey = async () => {
   }
 
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     // 压缩JSON后保存
     const compressedValue = compressJson(newKeyForm.value.value)
     await redis.setKeyValue({
@@ -1366,9 +1359,9 @@ const addKey = async () => {
     })
     await loadKeys()
     await loadDatabases()
-    showAddKeyDialog.value = false
+    sessionManager.active.showAddKeyDialog = false
     // 重置表单
-    newKeyForm.value = {
+    sessionManager.active.newKeyForm = {
       key: '',
       value: '',
       type: 'string'
@@ -1383,7 +1376,7 @@ const updateKey = async () => {
   if (!selectedServer.value || !editKeyForm.value.key) return
   
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     // 压缩JSON后保存
     const compressedValue = compressJson(editKeyForm.value.value)
     await redis.setKeyValue({
@@ -1396,51 +1389,48 @@ const updateKey = async () => {
       key_type: editKeyForm.value.type
     })
     await loadKeyValue(editKeyForm.value.key)
-    showEditKeyDialog.value = false
-    messageType.value = 'success'
-    message.value = '修改成功'
+    sessionManager.active.showEditKeyDialog = false
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '修改成功'
   } catch (error: any) {
     console.error('修改键失败:', error)
-    messageType.value = 'error'
-    message.value = `修改键失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `修改键失败: ${error.message || error}`
   }
 }
 
 const deleteKey = async () => {
   if (!selectedServer.value || !selectedKey.value) return
   if (isCurrentServerReadonly.value) {
-    messageType.value = 'error'
-    message.value = '当前服务器为只读模式，无法删除Key'
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = '当前服务器为只读模式，无法删除Key'
     return
   }
   try {
     await ElMessageBox.confirm('确定要删除该键吗？删除后将删除废键箱，7天后自动清除。', '确认删除', {
       confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning',
     })
-    message.value = ''
+    sessionManager.active.message = ''
     await trash.moveToTrash({
       host: selectedServer.value.host, port: selectedServer.value.port,
       password: selectedServer.value.password, db: selectedDb.value ?? 0, key: selectedKey.value,
     })
-    selectedKey.value = ''
-    keyValue.value = ''
-    keyType.value = ''
-    editKeyForm.value = { key: '', value: '', type: 'string' }
+    sessionManager.active.clearKeyDetail()
     await loadKeys()
     await loadDatabases()
     await loadTrashItems()
-    messageType.value = 'success'
-    message.value = '已删除废键箱，7天后自动清除'
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '已删除废键箱，7天后自动清除'
   } catch (error: any) {
     if (error === 'cancel' || error?.toString?.().includes('cancel')) return
-    messageType.value = 'error'
-    message.value = `删除键失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `删除键失败: ${error.message || error}`
   }
 }
 
 const selectExportFolder = async () => {
   try {
-    isFolderLoading.value = true
+    sessionManager.active.isFolderLoading = true
     
     if (isTauriEnv()) {
       // Tauri 环境：使用原生对话框
@@ -1460,19 +1450,19 @@ const selectExportFolder = async () => {
           folderPath = selectedItems[0]
         }
         if (folderPath) {
-          exportFolderPath.value = folderPath
+          sessionManager.active.exportFolderPath = folderPath
         }
       }
     } else {
       // 浏览器环境：导出时直接下载，无需选择文件夹
-      exportFolderPath.value = 'browser-download'
+      sessionManager.active.exportFolderPath = 'browser-download'
     }
   } catch (e) {
     console.error('文件夹选择错误:', e)
-    messageType.value = 'error'
-    message.value = `文件夹选择失败: ${e}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `文件夹选择失败: ${e}`
   } finally {
-    isFolderLoading.value = false
+    sessionManager.active.isFolderLoading = false
   }
 }
 
@@ -1482,24 +1472,24 @@ const exportData = async () => {
   console.log('打开导出对话框...')
   
   // 打开导出对话框
-  exportFileName.value = 'redis-export'
+  sessionManager.active.exportFileName = 'redis-export'
   // 不重置exportFolderPath，保持用户之前的选择
-  showExportDialog.value = true
+  sessionManager.active.showExportDialog = true
 }
 
 const handleExport = async () => {
   if (!selectedServer.value) return
   
   if (!exportFolderPath.value) {
-    messageType.value = 'error'
-    message.value = '请先选择保存文件夹'
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = '请先选择保存文件夹'
     return
   }
   
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     
-    const fileName = exportFileName.value || 'redis-export'
+    const fileName = sessionManager.active.exportFileName || 'redis-export'
     
     if (isTauriEnv()) {
       // Tauri 环境：通过后端写入文件
@@ -1514,9 +1504,9 @@ const handleExport = async () => {
         file_path: filePath
       })
       
-      showExportDialog.value = false
-      messageType.value = 'success'
-      message.value = `导出成功: ${filePath}`
+      sessionManager.active.showExportDialog = false
+      sessionManager.active.messageType = 'success'
+      sessionManager.active.message = `导出成功: ${filePath}`
     } else {
       // 浏览器环境：获取数据后下载为文件
       const keys = await redis.getKeys({
@@ -1549,14 +1539,14 @@ const handleExport = async () => {
       a.click()
       URL.revokeObjectURL(url)
       
-      showExportDialog.value = false
-      messageType.value = 'success'
-      message.value = `导出成功: ${fileName}.json`
+      sessionManager.active.showExportDialog = false
+      sessionManager.active.messageType = 'success'
+      sessionManager.active.message = `导出成功: ${fileName}.json`
     }
   } catch (error: any) {
     console.error('导出失败:', error)
-    messageType.value = 'error'
-    message.value = `导出失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `导出失败: ${error.message || error}`
   }
 }
 
@@ -1567,7 +1557,8 @@ const folderInput = ref<HTMLInputElement | null>(null)
 // 生命周期
 onMounted(async () => {
   try {
-    message.value = ''
+    sessionManager.init()
+    sessionManager.active.message = ''
     // 导入文件选择
     fileInput.value = document.createElement('input')
     fileInput.value.type = 'file'
@@ -1598,20 +1589,20 @@ onMounted(async () => {
               await loadKeys()
               console.log('导入成功:', filePath)
               // 显示成功提示（绿色，需要用户点击关闭）
-              messageType.value = 'success'
-              message.value = `导入成功: ${filePath}`
+              sessionManager.active.messageType = 'success'
+              sessionManager.active.message = `导入成功: ${filePath}`
             } catch (error: any) {
               console.error('导入失败:', error)
               // 忽略权限错误，直接显示成功提示
-              messageType.value = 'success'
-              message.value = `导入成功`
+              sessionManager.active.messageType = 'success'
+              sessionManager.active.message = `导入成功`
             }
           }
           reader.readAsText(file)
         } catch (error: any) {
           console.error('读取文件失败:', error)
-          messageType.value = 'success'
-          message.value = `导入成功`
+          sessionManager.active.messageType = 'success'
+          sessionManager.active.message = `导入成功`
         }
       }
     })
@@ -1682,46 +1673,61 @@ onMounted(async () => {
           if (selectedPath.includes('.')) {
             const lastSlashIndex = selectedPath.lastIndexOf('/')
             if (lastSlashIndex !== -1) {
-              exportFolderPath.value = selectedPath.substring(0, lastSlashIndex)
+              sessionManager.active.exportFolderPath = selectedPath.substring(0, lastSlashIndex)
               console.log('从文件路径提取的文件夹路径:', exportFolderPath.value)
             } else {
               // 如果没有找到斜杠，直接使用路径
-              exportFolderPath.value = selectedPath
+              sessionManager.active.exportFolderPath = selectedPath
               console.log('使用完整路径:', exportFolderPath.value)
             }
           } else {
             // 如果已经是文件夹路径，直接使用
-            exportFolderPath.value = selectedPath
+            sessionManager.active.exportFolderPath = selectedPath
             console.log('使用文件夹路径:', exportFolderPath.value)
           }
         } else {
           // 无法获取路径的情况
           console.log('无法获取完整路径，使用默认路径')
           // 显示一个友好的提示
-          exportFolderPath.value = '已选择文件夹'
+          sessionManager.active.exportFolderPath = '已选择文件夹'
         }
         
         // 完成后设置加载状态为false
-        isFolderLoading.value = false
+        sessionManager.active.isFolderLoading = false
       } else {
         // 用户取消选择
-        isFolderLoading.value = false
+        sessionManager.active.isFolderLoading = false
       }
     })
     
     // 加载服务器列表
     await server.loadServers()
     if (servers.value.length > 0) {
-      selectedServer.value = servers.value[0]
+      sessionManager.active.selectedServer = servers.value[0]
       await loadDatabases()
     }
     
     // 注册键盘快捷键
     document.addEventListener('keydown', handleKeyDown)
+    
+    // 监听 Tauri 菜单事件
+    setupMenuListener()
+
+    // 初始化菜单文本同步
+    if (isTauriEnv()) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('update_toggle_tab_bar_menu', {
+          showTabBar: sessionManager.showTabBar
+        })
+      } catch (err) {
+        console.error('初始化菜单文本失败:', err)
+      }
+    }
   } catch (error: any) {
     console.error('初始化失败:', error)
-    messageType.value = 'error'
-    message.value = `初始化失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `初始化失败: ${error.message || error}`
   }
 })
 
@@ -1734,7 +1740,7 @@ const importData = async () => {
   if (!selectedServer.value) return
   
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     
     if (isTauriEnv()) {
       // Tauri 环境：使用原生对话框选择文件
@@ -1760,8 +1766,8 @@ const importData = async () => {
       
       await loadDatabases()
       await loadKeys()
-      messageType.value = 'success'
-      message.value = `导入成功: ${filePath}`
+      sessionManager.active.messageType = 'success'
+      sessionManager.active.message = `导入成功: ${filePath}`
     } else {
       // 浏览器环境：使用已有的 fileInput 元素
       if (fileInput.value) {
@@ -1770,29 +1776,30 @@ const importData = async () => {
     }
   } catch (error: any) {
     console.error('导入失败:', error)
-    messageType.value = 'error'
-    message.value = `导入失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `导入失败: ${error.message || error}`
   }
 }
 
 // 服务器配置页面关闭
 const closeServerConfig = async () => {
-  showServerConfig.value = false
+  sessionManager.active.showServerConfig = false
   // 重新加载服务器列表，并同步更新当前选中的服务器（使 readonly 等配置实时生效）
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     await server.loadServers()
     // 用 store 中最新的数据刷新 selectedServer
-    if (selectedServer.value) {
-      const updated = servers.value.find((s: any) => s.id === selectedServer.value.id)
+    const currentServer = selectedServer.value
+    if (currentServer) {
+      const updated = servers.value.find((s: any) => s.id === currentServer.id)
       if (updated) {
-        selectedServer.value = updated
+        sessionManager.active.selectedServer = updated
       }
     }
   } catch (error: any) {
     console.error('加载服务器失败:', error)
-    messageType.value = 'error'
-    message.value = `加载服务器失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `加载服务器失败: ${error.message || error}`
   }
 }
 
@@ -1801,7 +1808,7 @@ const addDb = async () => {
   if (!selectedServer.value) return
   
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     
     // 选择指定编号的数据库（Redis会自动创建不存在的数据库）
     await redis.createDatabase({
@@ -1812,46 +1819,48 @@ const addDb = async () => {
     })
     
     // 将新增的数据库添加到前端跟踪列表中
-    newlyCreatedDbs.value.add(newDbNumber.value)
+    sessionManager.active.newlyCreatedDbs.add(newDbNumber.value)
     
     // 重新加载数据库列表
     await loadDatabases()
     
     // 选择新创建的数据库
-    selectedDb.value = newDbNumber.value
+    sessionManager.active.selectedDb = newDbNumber.value
     await loadKeys()
     
-    showAddDbDialog.value = false
+    sessionManager.active.showAddDbDialog = false
   } catch (error: any) {
     console.error('新增DB失败:', error)
-    messageType.value = 'error'
-    message.value = `新增DB失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `新增DB失败: ${error.message || error}`
   }
 }
 
 // 删除DB
 const deleteDb = async () => {
-  if (!selectedServer.value || selectedDbsForDelete.value.length === 0) return
+  const server = selectedServer.value
+  if (!server || selectedDbsForDelete.value.length === 0) return
   if (isCurrentServerReadonly.value) {
-    messageType.value = 'error'
-    message.value = '当前服务器为只读模式，无法删除DB'
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = '当前服务器为只读模式，无法删除DB'
     return
   }
 
   try {
-    message.value = ''
+    sessionManager.active.message = ''
 
     // 安全验证：要求输入服务器名称确认
+    const serverName = server.name
     await ElMessageBox.prompt(
-      `此操作将删除 DB ${selectedDbsForDelete.value.join(', ')}，不可恢复！\n\n请输入当前服务器名称 【${selectedServer.value.name}】 以确认操作：`,
+      `此操作将删除 DB ${selectedDbsForDelete.value.join(', ')}，不可恢复！\n\n请输入当前服务器名称 【${serverName}】 以确认操作：`,
       '删除 DB - 安全验证',
       {
         confirmButtonText: '确认删除',
         cancelButtonText: '取消',
         type: 'warning',
-        inputPlaceholder: `请输入 ${selectedServer.value.name}`,
+        inputPlaceholder: `请输入 ${serverName}`,
         inputValidator: (val: string) => {
-          if (!val || val.trim().toLowerCase() !== selectedServer.value.name.trim().toLowerCase()) {
+          if (!val || val.trim().toLowerCase() !== serverName.trim().toLowerCase()) {
             return '服务器名称不匹配，请重新输入'
           }
           return true
@@ -1862,23 +1871,23 @@ const deleteDb = async () => {
     // 批量删除选中的数据库
     for (const db of selectedDbsForDelete.value) {
       await redis.deleteDatabase({
-        host: selectedServer.value.host,
-        port: selectedServer.value.port,
-        password: selectedServer.value.password,
+        host: server.host,
+        port: server.port,
+        password: server.password,
         db
       })
     }
 
     await loadDatabases()
-    showDeleteDbDialog.value = false
-    selectedDbsForDelete.value = []
-    messageType.value = 'success'
-    message.value = 'DB 删除成功'
+    sessionManager.active.showDeleteDbDialog = false
+    sessionManager.active.selectedDbsForDelete = []
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = 'DB 删除成功'
   } catch (error: any) {
     if (error === 'cancel' || error?.toString?.().includes('cancel')) return
     console.error('删除DB失败:', error)
-    messageType.value = 'error'
-    message.value = `删除DB失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `删除DB失败: ${error.message || error}`
   }
 }
 
@@ -1888,8 +1897,9 @@ const deleteDb = async () => {
 
 // 切换多选模式
 const toggleMultiSelectMode = () => {
-  isMultiSelectMode.value = !isMultiSelectMode.value
-  if (!isMultiSelectMode.value) {
+  const session = sessionManager.active
+  session.isMultiSelectMode = !session.isMultiSelectMode
+  if (!session.isMultiSelectMode) {
     // 退出时清空选择
     clearSelection()
   }
@@ -1908,7 +1918,7 @@ const handleSelectAllCommand = async (command: string) => {
 const selectAllLoaded = () => {
   if (treeRef.value) {
     treeRef.value.setCheckedKeys(keys.value)
-    selectedKeys.value = [...keys.value]
+    sessionManager.active.selectedKeys = [...keys.value]
   }
 }
 
@@ -1925,7 +1935,7 @@ const selectAllKeys = async () => {
 const clearSelection = () => {
   if (treeRef.value) {
     treeRef.value.setCheckedKeys([])
-    selectedKeys.value = []
+    sessionManager.active.selectedKeys = []
   }
 }
 
@@ -1933,8 +1943,8 @@ const clearSelection = () => {
 const batchMoveToTrash = async () => {
   if (selectedKeys.value.length === 0 || !selectedServer.value) return
   if (isCurrentServerReadonly.value) {
-    messageType.value = 'error'
-    message.value = '当前服务器为只读模式，无法删除Key'
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = '当前服务器为只读模式，无法删除Key'
     return
   }
 
@@ -1949,7 +1959,7 @@ const batchMoveToTrash = async () => {
       }
     )
 
-    message.value = ''
+    sessionManager.active.message = ''
 
     const count = await trash.batchMoveToTrash({
       host: selectedServer.value.host,
@@ -1960,24 +1970,61 @@ const batchMoveToTrash = async () => {
     })
 
     // 清空选择并刷新
-    selectedKeys.value = []
-    isMultiSelectMode.value = false
+    sessionManager.active.selectedKeys = []
+    sessionManager.active.isMultiSelectMode = false
     await loadKeys()
     await loadDatabases()
     await loadTrashItems()
 
-    messageType.value = 'success'
-    message.value = `已将 ${count} 个键删除废键箱，7天后自动清除`
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = `已将 ${count} 个键删除废键箱，7天后自动清除`
   } catch (error: any) {
     if (error === 'cancel') return
-    messageType.value = 'error'
-    message.value = `批量删除失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `批量删除失败: ${error.message || error}`
   }
 }
 
 // 键盘快捷键处理
 const handleKeyDown = (event: KeyboardEvent) => {
-  if (!isMultiSelectMode.value) return
+  // Ctrl+T: 新建标签
+  if (event.ctrlKey && !event.shiftKey && event.key === 't') {
+    event.preventDefault()
+    sessionManager.createSession()
+    return
+  }
+
+  // Ctrl+N: 新建窗口
+  if (event.ctrlKey && !event.shiftKey && event.key === 'n') {
+    event.preventDefault()
+    createNewWindow()
+    return
+  }
+
+  // Ctrl+W: 关闭标签
+  if (event.ctrlKey && !event.shiftKey && event.key === 'w') {
+    event.preventDefault()
+    if (sessionManager.sessions.length > 1) {
+      sessionManager.closeSession(sessionManager.activeSessionId)
+    }
+    return
+  }
+
+  // Ctrl+Shift+W: 关闭窗口
+  if (event.ctrlKey && event.shiftKey && event.key === 'W') {
+    event.preventDefault()
+    window.close()
+    return
+  }
+
+  // Ctrl+Shift+T: 切换标签栏显示
+  if (event.ctrlKey && event.shiftKey && (event.key === 'T' || event.key === 't')) {
+    event.preventDefault()
+    sessionManager.showTabBar = !sessionManager.showTabBar
+    return
+  }
+
+  if (!sessionManager.active.isMultiSelectMode) return
 
   // Ctrl+A: 全选当前已加载
   if (event.ctrlKey && event.key === 'a' && !event.shiftKey) {
@@ -1997,10 +2044,73 @@ const handleKeyDown = (event: KeyboardEvent) => {
   }
 }
 
+// 新建窗口
+const createNewWindow = async () => {
+  if (isTauriEnv()) {
+    try {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+      const windowId = `window_${Date.now()}`
+      const webview = new WebviewWindow(windowId, {
+        url: '/?window=true',
+        title: 'Redis小助手',
+        width: 1000,
+        height: 800,
+      })
+      webview.once('tauri://error', (e) => {
+        console.error('创建窗口失败:', e)
+      })
+    } catch (err) {
+      console.error('创建窗口失败:', err)
+    }
+  } else {
+    window.open(window.location.href + '?window=true', '_blank')
+  }
+}
+
+// 监听 Tauri 菜单事件
+const setupMenuListener = async () => {
+  if (!isTauriEnv()) return
+  try {
+    const { listen } = await import('@tauri-apps/api/event')
+    await listen<string>('menu-event', async (event) => {
+      const id = event.payload
+      switch (id) {
+        case 'new_tab':
+          sessionManager.createSession()
+          break
+        case 'new_window':
+          createNewWindow()
+          break
+        case 'toggle_tab_bar':
+          sessionManager.showTabBar = !sessionManager.showTabBar
+          break
+        case 'help_doc':
+          if (isTauriEnv()) {
+            const { open } = await import('@tauri-apps/plugin-shell')
+            await open('https://gitee.com/skygreen2015/RedisManager/blob/master/help/HELP.md')
+          } else {
+            window.open('https://gitee.com/skygreen2015/RedisManager/blob/master/help/HELP.md', '_blank')
+          }
+          break
+        case 'about':
+          if (isTauriEnv()) {
+            const { open } = await import('@tauri-apps/plugin-shell')
+            await open('https://gitee.com/skygreen2015/RedisManager')
+          } else {
+            window.open('https://gitee.com/skygreen2015/RedisManager', '_blank')
+          }
+          break
+      }
+    })
+  } catch (err) {
+    console.error('菜单监听失败:', err)
+  }
+}
+
 // 处理多选勾选变化
 const handleCheckChange = () => {
   if (treeRef.value) {
-    selectedKeys.value = treeRef.value.getCheckedKeys(true)
+    sessionManager.active.selectedKeys = treeRef.value.getCheckedKeys(true)
   }
 }
 
@@ -2010,29 +2120,29 @@ const loadTrashItems = async () => {
   try {
     await trash.getTrashItems(selectedServer.value.host, selectedServer.value.port)
   } catch (error: any) {
-    messageType.value = 'error'
-    message.value = `加载废键箱失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `加载废键箱失败: ${error.message || error}`
   }
 }
 
 // 处理废键箱表格选择变化
 const handleTrashSelectionChange = (selection: any[]) => {
-  trashSelectedIds.value = selection.map((item: any) => item.id)
+  sessionManager.active.trashSelectedIds = selection.map((item: any) => item.id)
 }
 
 // 恢复单个废键箱项
 const restoreSingleItem = async (id: string) => {
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     await trash.restoreFromTrash(id)
     await loadTrashItems()
     await loadKeys()
     await loadDatabases()
-    messageType.value = 'success'
-    message.value = '恢复成功'
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '恢复成功'
   } catch (error: any) {
-    messageType.value = 'error'
-    message.value = `恢复失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `恢复失败: ${error.message || error}`
   }
 }
 
@@ -2045,17 +2155,17 @@ const batchRestoreFromTrash = async () => {
       '批量恢复',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'info' }
     )
-    message.value = ''
+    sessionManager.active.message = ''
     await trash.batchRestoreFromTrash(trashSelectedIds.value)
     await loadTrashItems()
     await loadKeys()
     await loadDatabases()
-    messageType.value = 'success'
-    message.value = `已恢复 ${trashSelectedIds.value.length} 项`
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = `已恢复 ${trashSelectedIds.value.length} 项`
   } catch (error: any) {
     if (error === 'cancel' || error?.toString?.().includes('cancel')) return
-    messageType.value = 'error'
-    message.value = `批量恢复失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `批量恢复失败: ${error.message || error}`
   }
 }
 
@@ -2065,15 +2175,15 @@ const deleteSingleItem = async (id: string) => {
     await ElMessageBox.confirm('确定要永久删除该项吗？此操作不可恢复。', '永久删除', {
       confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning',
     })
-    message.value = ''
+    sessionManager.active.message = ''
     await trash.permanentDelete([id])
     await loadTrashItems()
-    messageType.value = 'success'
-    message.value = '已永久删除'
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '已永久删除'
   } catch (error: any) {
     if (error === 'cancel' || error?.toString?.().includes('cancel')) return
-    messageType.value = 'error'
-    message.value = `删除失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `删除失败: ${error.message || error}`
   }
 }
 
@@ -2086,29 +2196,29 @@ const permanentDeleteTrash = async () => {
       '永久删除',
       { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' }
     )
-    message.value = ''
+    sessionManager.active.message = ''
     await trash.permanentDelete(trashSelectedIds.value)
     await loadTrashItems()
-    messageType.value = 'success'
-    message.value = `已永久删除 ${trashSelectedIds.value.length} 项`
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = `已永久删除 ${trashSelectedIds.value.length} 项`
   } catch (error: any) {
     if (error === 'cancel' || error?.toString?.().includes('cancel')) return
-    messageType.value = 'error'
-    message.value = `永久删除失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `永久删除失败: ${error.message || error}`
   }
 }
 
 // 清理过期废键箱项
 const clearExpiredTrash = async () => {
   try {
-    message.value = ''
+    sessionManager.active.message = ''
     await trash.clearExpired()
     await loadTrashItems()
-    messageType.value = 'success'
-    message.value = '已清理过期项'
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '已清理过期项'
   } catch (error: any) {
-    messageType.value = 'error'
-    message.value = `清理过期项失败: ${error.message || error}`
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `清理过期项失败: ${error.message || error}`
   }
 }
 
@@ -2126,9 +2236,10 @@ const getTypeTagColor = (type: string): string => {
 
 // 当前服务器废键箱数量
 const currentServerTrashCount = computed(() => {
-  if (!selectedServer.value) return 0
+  const server = selectedServer.value
+  if (!server) return 0
   return trash.trashItems.filter(
-    (item: any) => item.host === selectedServer.value.host && item.port === selectedServer.value.port
+    (item: any) => item.host === server.host && item.port === server.port
   ).length
 })
 </script>
