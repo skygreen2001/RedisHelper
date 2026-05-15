@@ -458,13 +458,56 @@
       v-model="sessionManager.active.showServerConfig"
       title="服务器配置"
       width="800px"
-      height="80vh"
+      class="server-config-dialog"
+      align-center
       destroy-on-close
     >
       <ServerConfigView />
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="closeServerConfig">关闭</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 选择连接对话框 -->
+    <el-dialog
+      v-model="sessionManager.active.isSelectingServer"
+      title="选择连接"
+      width="450px"
+      :close-on-click-modal="false"
+      :show-close="sessionManager.sessions.length > 1"
+      :close-on-press-escape="sessionManager.sessions.length > 1"
+      align-center
+      destroy-on-close
+    >
+      <p class="select-server-hint">请选择一个服务器连接以创建标签页</p>
+      <div class="select-server-list">
+        <div
+          v-for="server in servers"
+          :key="server.id"
+          class="select-server-item"
+          @click="handleNewTabSelectServer(server)"
+        >
+          <div class="server-item-info">
+            <span class="server-item-name">{{ server.name }}</span>
+            <span class="server-item-addr">{{ server.host }}:{{ server.port }}</span>
+          </div>
+        </div>
+        <div v-if="servers.length === 0" class="select-server-empty">
+          <p>暂无可用连接</p>
+          <el-button type="primary" size="small" @click="openServerConfigFromDialog">前往设置</el-button>
+        </div>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button
+            v-if="sessionManager.sessions.length > 1"
+            @click="handleCancelNewTab"
+          >
+            取消
+          </el-button>
+          <span v-else></span>
         </span>
       </template>
     </el-dialog>
@@ -763,6 +806,31 @@ const handleDeviceCommand = (command: any) => {
   }
 }
 
+// 新建标签页 - 选择服务器
+const handleNewTabSelectServer = async (server: any) => {
+  const session = sessionManager.active
+  session.isSelectingServer = false
+  session.selectedServer = server
+  session.updateTitle()
+  await loadDatabases()
+}
+
+// 新建标签页 - 取消选择，关闭该标签页
+const handleCancelNewTab = () => {
+  const session = sessionManager.active
+  if (sessionManager.sessions.length > 1) {
+    sessionManager.closeSession(session.id)
+  } else {
+    session.isSelectingServer = false
+  }
+}
+
+// 从选择连接弹框跳转到服务器配置
+const openServerConfigFromDialog = () => {
+  sessionManager.active.isSelectingServer = false
+  sessionManager.active.showServerConfig = true
+}
+
 // 处理DB下拉菜单命令
 const handleDbCommand = async (command: any) => {
   if (command === 'add') {
@@ -952,6 +1020,8 @@ const handleServerChange = async () => {
     session.clearSelection()
   }
   if (session.selectedServer) {
+    // 重置 selectedDb 为 null，让 loadDatabases 默认选择 DB0
+    session.selectedDb = null
     session.updateTitle()
     await loadDatabases()
   }
@@ -1010,6 +1080,9 @@ const loadDatabases = async () => {
       sessionManager.active.visitedDbs.add(firstDb)
       await loadKeys()
     }
+    
+    // 更新标签标题（显示服务器名称和当前DB）
+    sessionManager.active.updateTitle()
   } catch (error: any) {
     console.error('加载数据库失败:', error)
     sessionManager.active.messageType = 'error'
@@ -1703,8 +1776,16 @@ onMounted(async () => {
     // 加载服务器列表
     await server.loadServers()
     if (servers.value.length > 0) {
+      sessionManager.active.isSelectingServer = false
       sessionManager.active.selectedServer = servers.value[0]
       await loadDatabases()
+      sessionManager.active.updateTitle()
+    } else {
+      // 没有连接设置时，直接跳转到设置界面
+      sessionManager.active.isSelectingServer = false
+      sessionManager.active.showServerConfig = true
+      // 标记必须添加连接才能关闭
+      sessionManager.active.requireServerConnection = true
     }
     
     // 注册键盘快捷键
@@ -1783,6 +1864,33 @@ const importData = async () => {
 
 // 服务器配置页面关闭
 const closeServerConfig = async () => {
+  // 如果必须添加连接才能关闭，且当前没有连接，则弹出确认
+  if (sessionManager.active.requireServerConnection && servers.value.length === 0) {
+    try {
+      await ElMessageBox.confirm(
+        '尚未添加任何服务器连接，确定要退出吗？退出后将无法使用应用。',
+        '确认退出',
+        { confirmButtonText: '退出', cancelButtonText: '继续设置', type: 'warning' }
+      )
+    } catch {
+      // 用户取消，不关闭
+      return
+    }
+
+    // 用户确认退出，关闭窗口
+    sessionManager.active.requireServerConnection = false
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      await getCurrentWindow().close()
+    } catch (err) {
+      console.error('关闭窗口失败:', err)
+      // 降级：尝试浏览器方式关闭
+      window.close()
+    }
+    return
+  }
+
+  sessionManager.active.requireServerConnection = false
   sessionManager.active.showServerConfig = false
   // 重新加载服务器列表，并同步更新当前选中的服务器（使 readonly 等配置实时生效）
   try {
@@ -2250,8 +2358,13 @@ const currentServerTrashCount = computed(() => {
   display: flex;
   flex-direction: column;
   background-color: #ffffff;
-  border: 1px solid #e4e7ed;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  overflow: hidden;
+  position: fixed;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  bottom: -1px;
 }
 
 /* 消息提示 */
@@ -2355,6 +2468,57 @@ const currentServerTrashCount = computed(() => {
 .debug-info {
   font-size: 12px;
   color: #909399;
+}
+
+/* 选择连接弹框 */
+.select-server-hint {
+  margin: 0 0 20px 0;
+  font-size: 13px;
+  color: #909399;
+}
+
+.select-server-list {
+  overflow-y: hidden;
+}
+
+.select-server-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.select-server-item:hover {
+  background: #ecf5ff;
+}
+
+.server-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.server-item-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.server-item-addr {
+  font-size: 12px;
+  color: #909399;
+}
+
+.select-server-empty {
+  text-align: center;
+  padding: 24px;
+  color: #909399;
+}
+
+.select-server-empty p {
+  margin-bottom: 12px;
 }
 
 /* 内容区域 */
@@ -2532,7 +2696,7 @@ const currentServerTrashCount = computed(() => {
 
 .key-list-content {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .key-list :deep(.el-tree) {
@@ -2581,7 +2745,7 @@ const currentServerTrashCount = computed(() => {
   display: flex;
   flex-direction: column;
   padding: 20px;
-  overflow: auto;
+  overflow: hidden;
   background-color: #ffffff;
 }
 
@@ -2609,7 +2773,7 @@ const currentServerTrashCount = computed(() => {
   padding: 16px;
   border: 1px solid #e4e7ed;
   border-radius: 4px;
-  overflow: auto;
+  overflow: hidden;
   margin-bottom: 16px;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
 }
@@ -2876,7 +3040,7 @@ const currentServerTrashCount = computed(() => {
 .menu-badge { margin-left: 6px; }
 .trash-view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .trash-toolbar { padding: 12px 15px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #e4e7ed; background-color: #ffffff; }
-.trash-list-content { flex: 1; overflow: auto; padding: 0; }
+.trash-list-content { flex: 1; overflow: hidden; padding: 0; }
 
 /* ========== 分页加载样式 ========== */
 .key-list-footer {
@@ -3010,5 +3174,33 @@ const currentServerTrashCount = computed(() => {
   font-size: 12px;
   color: #c0c4cc;
   margin-left: 4px;
+}
+
+/* 服务器配置对话框 - 顶部5vh间距，底部5vh间距 */
+.server-config-dialog {
+  --el-dialog-padding-primary: 0;
+}
+
+.server-config-dialog .el-dialog {
+  margin-top: 5vh !important;
+  margin-bottom: 5vh !important;
+  height: auto !important;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.server-config-dialog .el-dialog__body {
+  flex: 1;
+  padding: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.server-config-dialog .el-dialog__body .server-config-container {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 </style>

@@ -181,6 +181,7 @@ import { Plus, Edit, Delete, Connection, Check, Close, Download, Upload } from '
 import { serverStore } from '../stores/serverStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { isTauriEnv } from '../utils/tauri'
+import { sessionManager } from '../sessions/SessionManager'
 
 const server = serverStore()
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -275,12 +276,36 @@ const confirmDelete = (row: any) => {
 const deleteServer = async () => {
   if (!selectedServer.value) return
   
+  const serverId = selectedServer.value.id
+  
   try {
-    await server.deleteServer(selectedServer.value.id)
+    // 关闭所有使用该连接的标签页
+    const sessionsToClose = sessionManager.sessions.filter(
+      s => s.selectedServer?.id === serverId
+    )
+    
+    // 如果当前只有一个页面并且是当前连接，则重置该连接为无需要用户选择连接
+    if (sessionManager.sessions.length === 1 && 
+        sessionManager.sessions[0].selectedServer?.id === serverId) {
+      // 重置为选择连接状态
+      sessionManager.sessions[0].selectedServer = null
+      sessionManager.sessions[0].isSelectingServer = true
+      sessionManager.sessions[0].title = '新标签'
+    } else {
+      // 关闭所有使用该连接的标签页
+      for (const session of sessionsToClose) {
+        sessionManager.closeSession(session.id)
+      }
+    }
+    
+    await server.deleteServer(serverId)
     showDeleteDialog.value = false
     selectedServer.value = null
+    
+    ElMessage.success('服务器已删除')
   } catch (error) {
     console.error('删除服务器失败:', error)
+    ElMessage.error('删除服务器失败')
   }
 }
 
@@ -438,6 +463,7 @@ onMounted(async () => {
   flex-direction: column;
   background-color: #ffffff;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  overflow: hidden;
 }
 
 .header {
@@ -487,6 +513,7 @@ onMounted(async () => {
   border-radius: 4px;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  max-height: 400px;
 }
 
 .el-table :deep(.el-table__header-wrapper) {

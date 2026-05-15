@@ -58,6 +58,9 @@ export class SessionManagerClass {
     if (server) {
       session.selectedServer = server
       session.updateTitle()
+    } else {
+      // 没有指定服务器时，需要用户选择连接
+      session.isSelectingServer = true
     }
     this.sessions.push(session)
     this.activeSessionId = session.id

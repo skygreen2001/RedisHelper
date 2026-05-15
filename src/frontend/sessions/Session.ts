@@ -57,7 +57,7 @@ export class Session {
   selectedKeys: string[] = []
 
   // 标签栏
-  showTabBar = true
+  showTabBar = false
 
   // 消息
   message = ''
@@ -71,6 +71,12 @@ export class Session {
   showDeleteDbDialog = false
   showExportDialog = false
   showFlushDialog = false
+
+  // 新建标签页时等待用户选择连接
+  isSelectingServer = false
+
+  // 是否必须添加连接才能关闭设置页面
+  requireServerConnection = false
 
   // 表单
   newKeyForm = { key: '', value: '', type: 'string' }
