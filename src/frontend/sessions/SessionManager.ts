@@ -53,8 +53,13 @@ export class SessionManagerClass {
   }
 
   /** 创建新会话 */
-  createSession(title?: string, server?: ServerConfig): Session {
+  createSession(title?: string, server?: ServerConfig, activate: boolean = true): Session {
     const session = reactive(new Session(title || '新标签')) as Session
+    // 继承当前会话的 showTabBar 状态（避免调用 this.active 导致无限递归）
+    if (this.sessions.length > 0) {
+      const currentActive = this.sessions.find(s => s.id === this.activeSessionId) || this.sessions[0]
+      session.showTabBar = currentActive.showTabBar
+    }
     if (server) {
       session.selectedServer = server
       session.updateTitle()
@@ -63,7 +68,9 @@ export class SessionManagerClass {
       session.isSelectingServer = true
     }
     this.sessions.push(session)
-    this.activeSessionId = session.id
+    if (activate) {
+      this.activeSessionId = session.id
+    }
     return session
   }
 

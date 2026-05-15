@@ -1,7 +1,7 @@
 <template>
   <div class="main-container">
     <!-- 标签栏（最顶部） -->
-    <TabBar />
+    <TabBar @new-tab="handleNewTabFromTabBar" />
 
     <!-- 消息提示 -->
     <el-alert
@@ -472,14 +472,14 @@
 
     <!-- 选择连接对话框 -->
     <el-dialog
-      v-model="sessionManager.active.isSelectingServer"
+      v-model="showSelectServerDialog"
       title="选择连接"
       width="450px"
       :close-on-click-modal="false"
       :show-close="sessionManager.sessions.length > 1"
       :close-on-press-escape="sessionManager.sessions.length > 1"
       align-center
-      destroy-on-close
+      @close="handleCancelNewTab"
     >
       <p class="select-server-hint">请选择一个服务器连接以创建标签页</p>
       <div class="select-server-list">
@@ -673,6 +673,7 @@ const redis = redisStore()
 const trash = trashStore()
 
 // 状态
+const showSelectServerDialog = ref(false)
 const selectedServer = computed(() => sessionManager.active?.selectedServer ?? null)
 const selectedDb = computed(() => sessionManager.active?.selectedDb)
 const databases = computed(() => sessionManager.active?.databases || [])
@@ -806,22 +807,57 @@ const handleDeviceCommand = (command: any) => {
   }
 }
 
+// 从标签栏新建标签页
+const handleNewTabFromTabBar = () => {
+  // 创建新会话但不切换活动会话，保持当前页面不变
+  const newSession = sessionManager.createSession('新标签', undefined, false)
+  // 设置新会话为选择服务器状态
+  newSession.isSelectingServer = true
+  // 显示选择连接对话框
+  showSelectServerDialog.value = true
+}
+
 // 新建标签页 - 选择服务器
 const handleNewTabSelectServer = async (server: any) => {
-  const session = sessionManager.active
-  session.isSelectingServer = false
-  session.selectedServer = server
-  session.updateTitle()
-  await loadDatabases()
+  // 找到正在选择服务器的会话
+  const selectingSession = sessionManager.sessions.find(
+    s => s.isSelectingServer
+  )
+  
+  if (selectingSession) {
+    selectingSession.isSelectingServer = false
+    selectingSession.selectedServer = server
+    selectingSession.updateTitle()
+    // 切换到新会话
+    sessionManager.activeSessionId = selectingSession.id
+    await loadDatabases()
+    // 关闭选择连接对话框
+    showSelectServerDialog.value = false
+  }
 }
 
 // 新建标签页 - 取消选择，关闭该标签页
 const handleCancelNewTab = () => {
-  const session = sessionManager.active
-  if (sessionManager.sessions.length > 1) {
-    sessionManager.closeSession(session.id)
-  } else {
-    session.isSelectingServer = false
+  // 关闭选择连接对话框
+  showSelectServerDialog.value = false
+  
+  // 找到正在选择服务器的会话
+  const selectingSession = sessionManager.sessions.find(
+    s => s.isSelectingServer
+  )
+  
+  if (selectingSession) {
+    // 如果有多个会话，关闭新会话
+    if (sessionManager.sessions.length > 1) {
+      sessionManager.closeSession(selectingSession.id)
+    } else {
+      // 如果只有一个会话，取消选择状态
+      selectingSession.isSelectingServer = false
+      if (servers.value.length === 0) {
+        selectingSession.showServerConfig = true
+        selectingSession.requireServerConnection = true
+      }
+    }
   }
 }
 
@@ -1896,12 +1932,20 @@ const closeServerConfig = async () => {
   try {
     sessionManager.active.message = ''
     await server.loadServers()
-    // 用 store 中最新的数据刷新 selectedServer
-    const currentServer = selectedServer.value
-    if (currentServer) {
-      const updated = servers.value.find((s: any) => s.id === currentServer.id)
-      if (updated) {
-        sessionManager.active.selectedServer = updated
+    // 如果只有一个连接且当前没有选中任何连接，自动使用这个连接
+    if (servers.value.length === 1 && !sessionManager.active.selectedServer) {
+      sessionManager.active.selectedServer = servers.value[0]
+      sessionManager.active.isSelectingServer = false
+      await loadDatabases()
+      sessionManager.active.updateTitle()
+    } else {
+      // 用 store 中最新的数据刷新 selectedServer
+      const currentServer = selectedServer.value
+      if (currentServer) {
+        const updated = servers.value.find((s: any) => s.id === currentServer.id)
+        if (updated) {
+          sessionManager.active.selectedServer = updated
+        }
       }
     }
   } catch (error: any) {

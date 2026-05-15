@@ -16,7 +16,7 @@
         >×</span>
       </div>
     </div>
-    <div class="tab-new" @click="sessionManager.createSession()" title="新建标签">
+    <div class="tab-new" @click="handleNewTab" title="新建标签">
       +
     </div>
   </div>
@@ -24,6 +24,14 @@
 
 <script setup lang="ts">
 import { sessionManager } from '../sessions/SessionManager'
+
+const emit = defineEmits<{
+  (e: 'newTab'): void
+}>()
+
+const handleNewTab = () => {
+  emit('newTab')
+}
 </script>
 
 <style scoped>

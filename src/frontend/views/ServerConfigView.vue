@@ -287,10 +287,28 @@ const deleteServer = async () => {
     // 如果当前只有一个页面并且是当前连接，则重置该连接为无需要用户选择连接
     if (sessionManager.sessions.length === 1 && 
         sessionManager.sessions[0].selectedServer?.id === serverId) {
-      // 重置为选择连接状态
-      sessionManager.sessions[0].selectedServer = null
-      sessionManager.sessions[0].isSelectingServer = true
-      sessionManager.sessions[0].title = '新标签'
+      // 删除后服务器列表为空，需要标记必须添加连接
+      const remainingServers = server.servers.filter(s => s.id !== serverId)
+      if (remainingServers.length === 0) {
+        // 重置当前会话状态
+        sessionManager.sessions[0].selectedServer = null
+        sessionManager.sessions[0].selectedDb = null
+        sessionManager.sessions[0].keys = []
+        sessionManager.sessions[0].selectedKey = ''
+        sessionManager.sessions[0].keyValue = ''
+        sessionManager.sessions[0].message = ''
+        // 标记必须添加连接才能关闭设置页面
+        sessionManager.sessions[0].requireServerConnection = true
+        // 跳转到服务器配置页面
+        sessionManager.sessions[0].isSelectingServer = false
+        sessionManager.sessions[0].showServerConfig = true
+        sessionManager.sessions[0].title = '新标签'
+      } else {
+        // 还有其他服务器，重置为选择连接状态
+        sessionManager.sessions[0].selectedServer = null
+        sessionManager.sessions[0].isSelectingServer = true
+        sessionManager.sessions[0].title = '新标签'
+      }
     } else {
       // 关闭所有使用该连接的标签页
       for (const session of sessionsToClose) {
