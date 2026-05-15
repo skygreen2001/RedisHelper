@@ -56,9 +56,6 @@ export class Session {
   isMultiSelectMode = false
   selectedKeys: string[] = []
 
-  // 标签栏
-  showTabBar = false
-
   // 消息
   message = ''
   messageType: 'success' | 'error' = 'error'

@@ -5,22 +5,59 @@
 import { reactive } from 'vue'
 import { Session, ServerConfig } from './Session'
 
+const SHOW_TAB_BAR_KEY = 'redis-helper-show-tab-bar'
+
 export class SessionManagerClass {
   sessions: Session[] = reactive([])
   activeSessionId: string = ''
+  _showTabBar = false
 
-  /** 获取当前活动会话的标签栏显示状态 */
-  get showTabBar(): boolean {
-    return this.active.showTabBar
+  constructor() {
+    // 初始化时从 localStorage 读取设置
+    this.loadShowTabBar()
+    // 监听 storage 事件，实现跨窗口同步
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', (event) => {
+        if (event.key === SHOW_TAB_BAR_KEY) {
+          this._showTabBar = event.newValue === 'true'
+          this.syncMenuText(this._showTabBar)
+        }
+      })
+    }
   }
 
-  /** 设置当前活动会话的标签栏显示状态 */
+  /** 从 localStorage 加载 showTabBar 设置 */
+  private loadShowTabBar(): void {
+    try {
+      const saved = localStorage.getItem(SHOW_TAB_BAR_KEY)
+      this._showTabBar = saved === 'true'
+    } catch {
+      this._showTabBar = false
+    }
+  }
+
+  /** 保存 showTabBar 设置到 localStorage */
+  private saveShowTabBar(): void {
+    try {
+      localStorage.setItem(SHOW_TAB_BAR_KEY, String(this._showTabBar))
+    } catch (err) {
+      console.error('保存标签栏设置失败:', err)
+    }
+  }
+
+  /** 获取标签栏显示状态（全局） */
+  get showTabBar(): boolean {
+    return this._showTabBar
+  }
+
+  /** 设置标签栏显示状态（全局） */
   set showTabBar(value: boolean) {
-    const oldValue = this.active.showTabBar
-    this.active.showTabBar = value
+    const oldValue = this._showTabBar
+    this._showTabBar = value
 
     // 同步更新菜单文本
     if (oldValue !== value) {
+      this.saveShowTabBar()
       this.syncMenuText(value)
     }
   }
@@ -28,8 +65,8 @@ export class SessionManagerClass {
   /** 同步菜单文本到 Rust 后端 */
   private async syncMenuText(showTabBar: boolean): Promise<void> {
     if (typeof window === 'undefined') return
-    const win = window as any
-    if (!win.__TAURI__ && !win.__TAURI_INTERNALS__ && !win.__TAURI_IPC__) return
+    const w = window as any
+    if (!w.__TAURI__ && !w.__TAURI_INTERNALS__ && !w.__TAURI_IPC__) return
 
     try {
       const { invoke } = await import('@tauri-apps/api/core')
@@ -55,11 +92,6 @@ export class SessionManagerClass {
   /** 创建新会话 */
   createSession(title?: string, server?: ServerConfig, activate: boolean = true): Session {
     const session = reactive(new Session(title || '新标签')) as Session
-    // 继承当前会话的 showTabBar 状态（避免调用 this.active 导致无限递归）
-    if (this.sessions.length > 0) {
-      const currentActive = this.sessions.find(s => s.id === this.activeSessionId) || this.sessions[0]
-      session.showTabBar = currentActive.showTabBar
-    }
     if (server) {
       session.selectedServer = server
       session.updateTitle()
