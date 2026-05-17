@@ -12,11 +12,14 @@ export function isTauriEnv(): boolean {
 // - Tauri 环境 → 调用 Rust 后端
 // - 浏览器环境 → 调用浏览器适配层（WebSocket 代理 + localStorage）
 export async function safeInvoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
-  if (isTauriEnv()) {
+  const tauri = isTauriEnv()
+  if (tauri) {
+    console.log(`[safeInvoke] → TAURI IPC: ${cmd}`, args ? Object.keys(args) : '')
     const { invoke } = await import('@tauri-apps/api/core')
     return invoke<T>(cmd, args)
   }
   // 浏览器环境：使用适配层
+  console.log(`[safeInvoke] → BROWSER adapter: ${cmd}`)
   const { browserExecute } = await import('../adapters/browser-adapter')
   return browserExecute(cmd, args) as Promise<T>
 }

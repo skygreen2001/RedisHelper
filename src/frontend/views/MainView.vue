@@ -82,6 +82,9 @@
               <el-dropdown-item command="generateTestData">
                 <el-icon><Plus /></el-icon> 生成测试数据
               </el-dropdown-item>
+              <el-dropdown-item command="log" divided>
+                <el-icon><Document /></el-icon> 日志
+              </el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -607,8 +610,7 @@
     
     <!-- 清空确认对话框 -->
     <el-dialog
-      v-model="sessionManager.active.showFlushDialog"
-      title="确认清空"
+      v-model="sessionManager.active.showFlushDialog"      title="确认清空"
       width="400px"
     >
       <div class="flush-confirm-content">
@@ -624,20 +626,28 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- 日志对话框 -->
+    <LogDialog v-model="showLogDialog" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown, Check } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown, Check, Document } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
 import { trashStore } from '../stores/trashStore'
 import { ElMessageBox } from 'element-plus'
 import ServerConfigView from './ServerConfigView.vue'
 import TabBar from '../components/TabBar.vue'
+import LogDialog from '../components/LogDialog.vue'
 import { sessionManager } from '../sessions/SessionManager'
 import { isTauriEnv } from '../utils/tauri'
+import { useLogStore } from '../stores/logStore'
+
+const logStore = useLogStore()
+const showLogDialog = ref(false)
 
 // 简化的 Tauri 环境检测
 function checkIsTauri(): boolean {
@@ -923,7 +933,25 @@ const handleActionCommand = (command: string) => {
     case 'generateTestData':
       handleGenerateTestData()
       break
+    case 'log':
+      handleOpenLog()
+      break
   }
+}
+
+// 打开日志对话框
+const handleOpenLog = () => {
+  const srv = selectedServer.value
+  if (!srv) {
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = '请先连接到一个 Redis 服务器'
+    return
+  }
+  // 注册当前连接到 logStore（幂等，重复注册无副作用）
+  logStore.registerServer(srv.id, srv.name, srv.host, srv.port, srv.password)
+  showLogDialog.value = true
+  // 自动加载历史
+  logStore.setActiveServer(srv.id)
 }
 
 // 生成测试数据

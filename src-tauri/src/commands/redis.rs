@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::redis::connection::RedisConnection;
+use crate::redis::connection::{RedisConnection, SlowlogRaw};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConnectRequest {
@@ -217,8 +217,63 @@ pub fn generate_test_data(req: ConnectRequest, count: u32) -> Result<bool, Strin
                     _ => {}
                 }
             }
-            
+
             Ok(true)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SlowlogRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+}
+
+/// 可序列化的 SLOWLOG 条目（Tauri IPC 传输用）
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SlowlogEntry {
+    pub id: u64,
+    pub time: u64,
+    pub cost_ms: u64,
+    pub cmd: String,
+    pub args: Vec<String>,
+    pub client: String,
+}
+
+impl From<SlowlogRaw> for SlowlogEntry {
+    fn from(raw: SlowlogRaw) -> Self {
+        Self {
+            id: raw.id,
+            time: raw.time,
+            cost_ms: raw.cost_ms,
+            cmd: raw.cmd,
+            args: raw.args,
+            client: raw.client,
+        }
+    }
+}
+
+/// 噪音命令黑名单（与 ws-proxy 保持一致）
+const SLOWLOG_NOISE_CMDS: &[&str] = &[
+    "PING", "CLIENT", "AUTH", "CONFIG", "INFO",
+    "COMMAND", "SLOWLOG", "MONITOR",
+];
+
+#[tauri::command]
+pub fn slowlog_get(req: SlowlogRequest) -> Result<Vec<SlowlogEntry>, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            // 不调用 SELECT，SLOWLOG 是全局的，不需要选库
+            let raw_entries = conn.slowlog_get().map_err(|e| e.to_string())?;
+            // 服务端过滤噪音命令 + 转为可序列化类型
+            let filtered: Vec<SlowlogEntry> = raw_entries
+                .into_iter()
+                .filter(|e| !SLOWLOG_NOISE_CMDS.contains(&e.cmd.to_uppercase().as_str()))
+                .map(SlowlogEntry::from)
+                .collect();
+            Ok(filtered)
         }
         Err(e) => Err(e.to_string()),
     }

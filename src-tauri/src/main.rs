@@ -173,6 +173,7 @@ fn main() {
             commands::redis::delete_database,
             commands::redis::flush_database,
             commands::redis::generate_test_data,
+            commands::redis::slowlog_get,
             commands::export::export_data,
             commands::export::import_data,
             commands::trash::move_to_trash,

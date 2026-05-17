@@ -154,4 +154,76 @@ impl RedisConnection {
         let _: () = redis::cmd("FLUSHDB").query(&mut self.conn)?;
         Ok(())
     }
+
+    /// 获取 SLOWLOG 历史记录（只读，不修改 Redis 配置）
+    /// Redis 7+ 返回格式: [id, timestamp_us, duration_us, [cmd, args...], client_addr, client_name]
+    pub fn slowlog_get(&mut self) -> Result<Vec<SlowlogRaw>, Box<dyn Error>> {
+        let raw: Vec<redis::Value> = redis::cmd("SLOWLOG").arg("GET").arg(9999).query(&mut self.conn)?;
+        let entries: Vec<SlowlogRaw> = raw
+            .into_iter()
+            .filter_map(|v| {
+                if let redis::Value::Array(items) = v {
+                    Some(parse_slowlog_entry(items))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Ok(entries)
+    }
+}
+
+/// SLOWLOG 原始条目（内部解析用，不含 Serialize）
+pub struct SlowlogRaw {
+    pub id: u64,
+    pub time: u64,
+    pub cost_ms: u64,
+    pub cmd: String,
+    pub args: Vec<String>,
+    pub client: String,
+}
+
+fn parse_slowlog_entry(items: Vec<redis::Value>) -> SlowlogRaw {
+    let get_u64 = |idx: usize| -> u64 {
+        if idx < items.len() {
+            match &items[idx] {
+                redis::Value::Int(n) => *n as u64,
+                _ => 0,
+            }
+        } else { 0 }
+    };
+    let get_str = |idx: usize| -> String {
+        if idx < items.len() {
+            match &items[idx] {
+                redis::Value::BulkString(s) => String::from_utf8_lossy(s).to_string(),
+                redis::Value::Int(i) => i.to_string(),
+                _ => String::new(),
+            }
+        } else { String::new() }
+    };
+    let get_args = |idx: usize| -> (String, Vec<String>) {
+        if idx < items.len() {
+            if let redis::Value::Array(argv) = &items[idx] {
+                let mut argv_strs: Vec<String> = argv.iter().map(|a| match a {
+                    redis::Value::BulkString(s) => String::from_utf8_lossy(s).to_string(),
+                    redis::Value::Int(i) => i.to_string(),
+                    _ => String::new(),
+                }).collect();
+                let cmd = if !argv_strs.is_empty() { argv_strs.remove(0) } else { String::new() };
+                (cmd, argv_strs)
+            } else { (String::new(), Vec::new()) }
+        } else { (String::new(), Vec::new()) }
+    };
+
+    let id = get_u64(0);
+    let time = get_u64(1);
+    let cost_us = get_u64(2);
+    let (cmd, args) = get_args(3);
+    let client = get_str(4);
+
+    SlowlogRaw {
+        id, time,
+        cost_ms: cost_us / 1000,
+        cmd, args, client,
+    }
 }

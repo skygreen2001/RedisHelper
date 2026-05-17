@@ -11,19 +11,12 @@ let wsReady = false
 const pendingRequests = new Map<string, { resolve: (v: any) => void; reject: (e: any) => void }>()
 let requestId = 0
 
-function getWsUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.hostname}:8765`
-}
-
-function ensureWs(): Promise<WebSocket> {
+async function ensureWs(): Promise<WebSocket> {
+  if (ws && wsReady) return ws
+  
   return new Promise((resolve, reject) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      resolve(ws)
-      return
-    }
-    
-    const url = getWsUrl()
+    const url = `ws://${window.location.hostname}:8765`
+    console.log('[browser-adapter] 连接 WebSocket 代理:', url)
     const socket = new WebSocket(url)
     ws = socket
     
@@ -395,6 +388,7 @@ const PROXY_COMMANDS = new Set([
   'flush_database',
   'generate_test_data',
   'test_connection',
+  'slowlog_get',
 ])
 
 // ========== 需要通过 localStorage 的服务器命令 ==========

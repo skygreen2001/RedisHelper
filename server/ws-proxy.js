@@ -11,7 +11,7 @@ import Redis from 'ioredis'
 
 const PORT = process.env.WS_PROXY_PORT || 8765
 
-// 更简单的 Redis 连接管理，让 ioredis 自己处理连接
+// 统一 Redis 命令执行（自动管理连接生命周期）
 async function executeRedisCommand(host, port, password, db, commandFn) {
   console.log(`[ws-proxy] 正在连接 Redis ${host}:${port} db=${db}`)
   
@@ -296,10 +296,76 @@ const handlers = {
       return { success: false, message: `连接失败: ${e.message}` }
     }
   },
+
+  // 获取 SLOWLOG（历史命令记录）
+  // 只读模式：不修改 Redis 配置，使用服务器原有阈值
+  // SLOWLOG GET count 最多返回 slowlog-max-len 条（默认 128），超出部分 Redis 已滚动覆盖
+  // 若需要更多历史，需在 redis.conf 中调大 slowlog-max-len 并重启 Redis
+  async slowlog_get({ host, port, password }) {
+    return executeRedisCommand(host, port, password, 0, async (conn) => {
+      console.log(`[ws-proxy][slowlog] 开始获取 ${host}:${port} 的 SLOWLOG...`)
+
+      // 读取慢日志（不限数量，取回 Redis 当前 slowlog-max-len 范围内的全部记录）
+      const raw = await conn.slowlog('GET', 9999)
+      console.log(`[ws-proxy][slowlog] SLOWLOG GET 返回: ${Array.isArray(raw) ? raw.length + ' 条' : JSON.stringify(raw)}`)
+
+      if (!Array.isArray(raw)) return []
+
+      // 服务端过滤：只保留用户数据操作指令，隐藏一切工具/驱动/诊断类指令
+      // 白名单思路：凡是 GET/SET/DEL/EXPIRE/HGET/HSET/LPUSH/LRANGE/SMEMBERS/ZRANGE
+      // 等数据操作才保留，其他全部过滤
+      const filtered = raw.filter(entry => {
+        const cmd = Array.isArray(entry[3]) ? (entry[3][0] || '').toUpperCase() : ''
+
+        // 1. 心跳/连接握手类（ioredis 每次新连接都会产生）
+        if (cmd === 'PING') return false
+        if (cmd === 'CLIENT') return false
+        if (cmd === 'AUTH') return false
+
+        // 2. 配置/诊断类（非用户数据操作）
+        if (cmd === 'CONFIG') return false
+        if (cmd === 'INFO') return false
+        if (cmd === 'COMMAND') return false
+
+        // 3. SLOWLOG 自身指令
+        if (cmd === 'SLOWLOG') return false
+
+        // 4. 安全过滤：MONITOR（虽然已移除实时监控，但保留过滤）
+        if (cmd === 'MONITOR') return false
+
+        return true
+      })
+
+      if (filtered.length !== raw.length) {
+        console.log(`[ws-proxy][slowlog] 过滤掉 ${raw.length - filtered.length} 条噪音，返回 ${filtered.length} 条`)
+      }
+
+      return filtered.map(entry => ({
+        id: entry[0],
+        time: entry[1],
+        costMs: entry[2],
+        cmd: Array.isArray(entry[3]) ? (entry[3][0] || '') : '',
+        args: Array.isArray(entry[3]) ? entry[3].slice(1) : [],
+        // Redis SLOWLOG 协议：entry[4]=client_addr, entry[5]=client_name（Redis 7+）
+        // 任何 Redis 版本均不含 db 字段，db 字段不可用
+        client: entry[4] || '',     // "127.0.0.1:52341" 格式
+      }))
+    })
+  },
 }
 
 // WebSocket 服务器
-const wss = new WebSocketServer({ port: PORT })
+const wss = new WebSocketServer({ 
+  port: PORT,
+  maxPayload: 100 * 1024 * 1024 // 100MB
+})
+
+wss.on('error', (err) => {
+  console.error(`[ws-proxy] WebSocket 服务器错误:`, err.message)
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[ws-proxy] 端口 ${PORT} 已被占用，请先停止占用该端口的进程`)
+  }
+})
 
 wss.on('connection', (ws) => {
   console.log(`[ws-proxy] 客户端已连接 (当前连接数: ${wss.clients.size})`)
@@ -311,7 +377,7 @@ wss.on('connection', (ws) => {
       const { id, command, args } = msg
       
       console.log(`[ws-proxy] 收到命令:`, command, args)
-      
+
       if (!handlers[command]) {
         ws.send(JSON.stringify({ id, error: `未知命令: ${command}` }))
         return
