@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redis 内存分析功能设计</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .design-container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .design-header {
+      text-align: center;
+      margin-bottom: 60px;
+      color: white;
+    }
+
+    .design-header h1 {
+      font-size: 48px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .design-header p {
+      font-size: 20px;
+      opacity: 0.9;
+    }
+
+    .design-card {
+      background: white;
+      border-radius: 16px;
+      padding: 40px;
+      margin-bottom: 40px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+    }
+
+    .design-card h2 {
+      font-size: 28px;
+      margin-bottom: 30px;
+      color: #303133;
+      border-bottom: 3px solid #409EFF;
+      padding-bottom: 15px;
+    }
+
+    .memory-dashboard {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+      margin-bottom: 40px;
+    }
+
+    .memory-card {
+      background: linear-gradient(135deg, #f5f7fa 0%, #e4e8eb 100%);
+      border-radius: 12px;
+      padding: 24px;
+      border-left: 4px solid #409EFF;
+      transition: all 0.3s ease;
+    }
+
+    .memory-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+    }
+
+    .memory-card-title {
+      font-size: 14px;
+      color: #909399;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .memory-card-value {
+      font-size: 36px;
+      font-weight: 700;
+      color: #303133;
+      margin-bottom: 8px;
+    }
+
+    .memory-card-detail {
+      font-size: 13px;
+      color: #606266;
+    }
+
+    .memory-card.warning {
+      border-left-color: #e6a23c;
+    }
+
+    .memory-card.danger {
+      border-left-color: #f56c6c;
+    }
+
+    .memory-card.success {
+      border-left-color: #67c23a;
+    }
+
+    .chart-section {
+      margin-top: 40px;
+    }
+
+    .chart-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-top: 20px;
+    }
+
+    .chart-box {
+      background: #fafafa;
+      border-radius: 12px;
+      padding: 20px;
+      border: 1px solid #ebeef5;
+    }
+
+    .chart-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #303133;
+      margin-bottom: 20px;
+    }
+
+    .pie-chart {
+      width: 200px;
+      height: 200px;
+      border-radius: 50%;
+      margin: 0 auto 20px;
+      position: relative;
+      background: conic-gradient(
+        #409EFF 0% 45%,
+        #67c23a 45% 70%,
+        #e6a23c 70% 85%,
+        #f56c6c 85% 93%,
+        #909399 93% 100%
+      );
+    }
+
+    .pie-chart::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 100px;
+      height: 100px;
+      background: white;
+      border-radius: 50%;
+    }
+
+    .chart-legend {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: #606266;
+    }
+
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .bar-chart {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .bar-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .bar-label {
+      width: 80px;
+      font-size: 14px;
+      color: #606266;
+    }
+
+    .bar-track {
+      flex: 1;
+      height: 24px;
+      background: #ebeef5;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 12px;
+      transition: width 0.6s ease;
+      display: flex;
+      align-items: center;
+      padding-left: 12px;
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .bar-fill.string { background: linear-gradient(90deg, #409EFF, #66b1ff); }
+    .bar-fill.hash { background: linear-gradient(90deg, #67c23a, #85ce61); }
+    .bar-fill.list { background: linear-gradient(90deg, #e6a23c, #ebb563); }
+    .bar-fill.set { background: linear-gradient(90deg, #f56c6c, #f78989); }
+    .bar-fill.zset { background: linear-gradient(90deg, #909399, #a6a9ad); }
+
+    .memory-top-keys {
+      margin-top: 40px;
+    }
+
+    .top-key-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      border-bottom: 1px solid #ebeef5;
+      transition: background 0.2s;
+    }
+
+    .top-key-item:hover {
+      background: #f5f7fa;
+    }
+
+    .top-key-item:last-child {
+      border-bottom: none;
+    }
+
+    .key-rank {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    .key-info {
+      flex: 1;
+      margin-left: 16px;
+    }
+
+    .key-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: #303133;
+      margin-bottom: 4px;
+    }
+
+    .key-type {
+      font-size: 13px;
+      color: #909399;
+    }
+
+    .key-memory {
+      text-align: right;
+    }
+
+    .key-memory-size {
+      font-size: 18px;
+      font-weight: 700;
+      color: #409EFF;
+      margin-bottom: 4px;
+    }
+
+    .key-memory-percent {
+      font-size: 13px;
+      color: #909399;
+    }
+
+    .ui-integration {
+      margin-top: 40px;
+    }
+
+    .menu-integration {
+      display: flex;
+      gap: 12px;
+      padding: 20px;
+      background: #f5f7fa;
+      border-radius: 8px;
+      margin-top: 16px;
+    }
+
+    .menu-item {
+      padding: 10px 20px;
+      background: white;
+      border-radius: 6px;
+      border: 1px solid #dcdfe6;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 14px;
+      color: #606266;
+    }
+
+    .menu-item:hover {
+      border-color: #409EFF;
+      color: #409EFF;
+    }
+
+    .menu-item.active {
+      background: #409EFF;
+      color: white;
+      border-color: #409EFF;
+    }
+
+    .feature-list {
+      margin-top: 30px;
+    }
+
+    .feature-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 20px;
+      background: #f5f7fa;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+
+    .feature-content h4 {
+      font-size: 18px;
+      color: #303133;
+      margin-bottom: 8px;
+    }
+
+    .feature-content p {
+      font-size: 14px;
+      color: #606266;
+      line-height: 1.6;
+    }
+
+    .code-example {
+      background: #282c34;
+      color: #abb2bf;
+      padding: 20px;
+      border-radius: 8px;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 14px;
+      line-height: 1.8;
+      overflow-x: auto;
+      margin-top: 20px;
+    }
+
+    .code-keyword { color: #c678dd; }
+    .code-string { color: #98c379; }
+    .code-number { color: #d19a66; }
+    .code-comment { color: #5c6370; font-style: italic; }
+    .code-function { color: #61afef; }
+
+    /* Key 内存详情列表样式 */
+    .key-memory-list-container {
+      border: 1px solid #ebeef5;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fafafa;
+    }
+
+    .key-memory-list-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 20px;
+      background: #fff;
+      border-bottom: 1px solid #ebeef5;
+      font-weight: 600;
+      color: #303133;
+    }
+
+    .header-key {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-icon {
+      font-size: 16px;
+    }
+
+    .header-size {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      color: #409EFF;
+    }
+
+    .header-size.sortable:hover {
+      color: #66b1ff;
+    }
+
+    .sort-icon {
+      font-size: 12px;
+      transition: transform 0.2s;
+    }
+
+    .key-memory-list-content {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .key-memory-list-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 20px;
+      background: #fff;
+      border-bottom: 1px solid #f0f0f0;
+      transition: background 0.2s;
+    }
+
+    .key-memory-list-item:hover {
+      background: #f5f7fa;
+    }
+
+    .key-memory-list-item:last-child {
+      border-bottom: none;
+    }
+
+    .item-key {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .item-index {
+      font-size: 12px;
+      color: #909399;
+      min-width: 32px;
+    }
+
+    .item-name {
+      font-size: 14px;
+      color: #303133;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .item-size {
+      display: flex;
+      align-items: center;
+    }
+
+    .size-badge {
+      background: linear-gradient(135deg, #66b1ff 0%, #409EFF 100%);
+      color: white;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .key-memory-list-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 20px;
+      background: #fff;
+      border-top: 1px solid #ebeef5;
+    }
+
+    .list-summary {
+      font-size: 13px;
+      color: #909399;
+    }
+
+    .refresh-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .refresh-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .refresh-icon {
+      font-size: 14px;
+    }
+
+    /* 下拉菜单样式 */
+    .dropdown-content {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+      font-size: 14px;
+      color: #606266;
+    }
+
+    .dropdown-item:hover {
+      background: #f5f7fa;
+    }
+
+    .dropdown-item.active {
+      background: #ecf5ff;
+      color: #409EFF;
+    }
+
+    .dropdown-icon {
+      font-size: 16px;
+    }
+
+    .dropdown-divider {
+      height: 1px;
+      background: #ebeef5;
+      margin: 8px 0;
+    }
+
+    @media (max-width: 768px) {
+      .chart-container {
+        grid-template-columns: 1fr;
+      }
+
+      .memory-dashboard {
+        grid-template-columns: 1fr;
+      }
+
+      .design-header h1 {
+        font-size: 32px;
+      }
+
+      .item-name {
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="design-container">
+      <div class="design-header">
+        <h1>🔍 Redis 内存分析功能设计</h1>
+        <p>智能洞察 · 优化决策 · 高效管理</p>
+      </div>
+
+      <!-- 功能概述 -->
+      <div class="design-card">
+        <h2>✨ 功能概述</h2>
+        
+        <div class="feature-list">
+          <div class="feature-item">
+            <div class="feature-icon">📊</div>
+            <div class="feature-content">
+              <h4>实时内存监控</h4>
+              <p>显示 Redis 服务器的实时内存使用情况，包括已用内存、峰值内存、内存碎片率等关键指标。</p>
+            </div>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-icon">📈</div>
+            <div class="feature-content">
+              <h4>键类型分布分析</h4>
+              <p>可视化展示 String、Hash、List、Set、ZSet 等不同类型键的数量和内存占用占比。</p>
+            </div>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-icon">🏆</div>
+            <div class="feature-content">
+              <h4>大键排行榜</h4>
+              <p>自动扫描并排序内存占用最大的前 N 个键，帮助快速定位可能需要优化的对象。</p>
+            </div>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-icon">💡</div>
+            <div class="feature-content">
+              <h4>优化建议</h4>
+              <p>基于内存使用情况，智能提供键类型转换、过期时间设置、数据压缩等优化建议。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 内存仪表盘 -->
+      <div class="design-card">
+        <h2>📊 内存仪表盘预览</h2>
+        
+        <div class="memory-dashboard">
+          <div class="memory-card">
+            <div class="memory-card-title">已用内存</div>
+            <div class="memory-card-value">1.25 GB</div>
+            <div class="memory-card-detail">总内存 2.00 GB · 使用率 62.5%</div>
+          </div>
+
+          <div class="memory-card success">
+            <div class="memory-card-title">峰值内存</div>
+            <div class="memory-card-value">1.48 GB</div>
+            <div class="memory-card-detail">发生在 2026-05-16 14:32</div>
+          </div>
+
+          <div class="memory-card warning">
+            <div class="memory-card-title">内存碎片率</div>
+            <div class="memory-card-value">1.42</div>
+            <div class="memory-card-detail">建议：可优化</div>
+          </div>
+
+          <div class="memory-card">
+            <div class="memory-card-title">键总数</div>
+            <div class="memory-card-value">15,892</div>
+            <div class="memory-card-detail">分布在 3 个数据库中</div>
+          </div>
+
+          <div class="memory-card success">
+            <div class="memory-card-title">过期键占比</div>
+            <div class="memory-card-value">23.5%</div>
+            <div class="memory-card-detail">3,734 个键设置了过期时间</div>
+          </div>
+
+          <div class="memory-card danger">
+            <div class="memory-card-title">大键数量</div>
+            <div class="memory-card-value">47</div>
+            <div class="memory-card-detail">占用总内存 856 MB</div>
+          </div>
+        </div>
+
+        <div class="chart-section">
+          <div class="chart-container">
+            <div class="chart-box">
+              <div class="chart-title">📈 键类型分布</div>
+              <div class="pie-chart"></div>
+              <div class="chart-legend">
+                <div class="legend-item">
+                  <div class="legend-dot" style="background: #409EFF;"></div>
+                  String (45%)
+                </div>
+                <div class="legend-item">
+                  <div class="legend-dot" style="background: #67c23a;"></div>
+                  Hash (25%)
+                </div>
+                <div class="legend-item">
+                  <div class="legend-dot" style="background: #e6a23c;"></div>
+                  List (15%)
+                </div>
+                <div class="legend-item">
+                  <div class="legend-dot" style="background: #f56c6c;"></div>
+                  Set (8%)
+                </div>
+                <div class="legend-item">
+                  <div class="legend-dot" style="background: #909399;"></div>
+                  ZSet (7%)
+                </div>
+              </div>
+            </div>
+
+            <div class="chart-box">
+              <div class="chart-title">📊 键类型内存占用</div>
+              <div class="bar-chart">
+                <div class="bar-item">
+                  <div class="bar-label">String</div>
+                  <div class="bar-track">
+                    <div class="bar-fill string" style="width: 85%;">576 MB</div>
+                  </div>
+                </div>
+                <div class="bar-item">
+                  <div class="bar-label">Hash</div>
+                  <div class="bar-track">
+                    <div class="bar-fill hash" style="width: 60%;">320 MB</div>
+                  </div>
+                </div>
+                <div class="bar-item">
+                  <div class="bar-label">List</div>
+                  <div class="bar-track">
+                    <div class="bar-fill list" style="width: 35%;">192 MB</div>
+                  </div>
+                </div>
+                <div class="bar-item">
+                  <div class="bar-label">Set</div>
+                  <div class="bar-track">
+                    <div class="bar-fill set" style="width: 20%;">96 MB</div>
+                  </div>
+                </div>
+                <div class="bar-item">
+                  <div class="bar-label">ZSet</div>
+                  <div class="bar-track">
+                    <div class="bar-fill zset" style="width: 15%;">66 MB</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 大键排行榜 -->
+      <div class="design-card">
+        <h2>🏆 大键排行榜（Top 10）</h2>
+        
+        <div class="memory-top-keys">
+          <div class="top-key-item">
+            <div class="key-rank">1</div>
+            <div class="key-info">
+              <div class="key-name">user:sessions:active</div>
+              <div class="key-type">Hash · 1,248 个字段</div>
+            </div>
+            <div class="key-memory">
+              <div class="key-memory-size">156 MB</div>
+              <div class="key-memory-percent">12.5%</div>
+            </div>
+          </div>
+
+          <div class="top-key-item">
+            <div class="key-rank">2</div>
+            <div class="key-info">
+              <div class="key-name">cache:products:all</div>
+              <div class="key-type">String · 序列化JSON</div>
+            </div>
+            <div class="key-memory">
+              <div class="key-memory-size">98 MB</div>
+              <div class="key-memory-percent">7.8%</div>
+            </div>
+          </div>
+
+          <div class="top-key-item">
+            <div class="key-rank">3</div>
+            <div class="key-info">
+              <div class="key-name">logs:access:2026</div>
+              <div class="key-type">List · 89,234 条记录</div>
+            </div>
+            <div class="key-memory">
+              <div class="key-memory-size">87 MB</div>
+              <div class="key-memory-percent">6.9%</div>
+            </div>
+          </div>
+
+          <div class="top-key-item">
+            <div class="key-rank">4</div>
+            <div class="key-info">
+              <div class="key-name">search:index:posts</div>
+              <div class="key-type">ZSet · 45,123 个元素</div>
+            </div>
+            <div class="key-memory">
+              <div class="key-memory-size">72 MB</div>
+              <div class="key-memory-percent">5.8%</div>
+            </div>
+          </div>
+
+          <div class="top-key-item">
+            <div class="key-rank">5</div>
+            <div class="key-info">
+              <div class="key-name">ratings:products</div>
+              <div class="key-type">ZSet · 12,456 个评分</div>
+            </div>
+            <div class="key-memory">
+              <div class="key-memory-size">58 MB</div>
+              <div class="key-memory-percent">4.6%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Key 内存详情列表 -->
+      <div class="design-card">
+        <h2>📋 Key 内存详情列表</h2>
+        
+        <div class="key-memory-list-container">
+          <div class="key-memory-list-header">
+            <div class="header-key">
+              <span class="header-icon">🔑</span>
+              <span>Key</span>
+            </div>
+            <div class="header-size sortable" @click="toggleSort">
+              <span>Size</span>
+              <span class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+            </div>
+          </div>
+          
+          <div class="key-memory-list-content">
+            <div class="key-memory-list-item" v-for="(item, index) in sortedKeyMemoryList" :key="index">
+              <div class="item-key">
+                <span class="item-index">{{ index + 1 }}.</span>
+                <span class="item-name">{{ item.key }}</span>
+              </div>
+              <div class="item-size">
+                <span class="size-badge">{{ item.size }}</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="key-memory-list-footer">
+            <span class="list-summary">Total: {{ keyMemoryList.length }} · Size: 3.32MB</span>
+            <button class="refresh-btn" @click="refreshList">
+              <span class="refresh-icon">🔄</span>
+              重新开始
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- UI 集成方式 -->
+      <div class="design-card">
+        <h2>🎨 UI 集成方式</h2>
+        
+        <div class="ui-integration">
+          <h3 style="margin-bottom: 16px; color: #303133;">菜单位置 - 更多菜单集成</h3>
+          <div class="menu-integration">
+            <div class="menu-item active">连接 ▼</div>
+            <div class="menu-item active">DB ▼</div>
+            <div class="menu-item" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-color: #667eea;">
+              更多 ▼
+            </div>
+            <div class="menu-item">多选</div>
+            <div class="menu-item">排序 ▼</div>
+          </div>
+          
+          <!-- 更多菜单下拉内容 -->
+          <div class="dropdown-content" style="margin-top: 16px; padding: 12px; background: #fff; border: 1px solid #ebeef5; border-radius: 8px;">
+            <div class="dropdown-item">
+              <span class="dropdown-icon">📥</span>
+              <span>导入</span>
+            </div>
+            <div class="dropdown-item">
+              <span class="dropdown-icon">📤</span>
+              <span>导出</span>
+            </div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-item">
+              <span class="dropdown-icon">🗑️</span>
+              <span>清空</span>
+            </div>
+            <div class="dropdown-item">
+              <span class="dropdown-icon">➕</span>
+              <span>生成测试数据</span>
+            </div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-item active">
+              <span class="dropdown-icon">📊</span>
+              <span>内存分析</span>
+            </div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-item">
+              <span class="dropdown-icon">📝</span>
+              <span>日志</span>
+            </div>
+          </div>
+
+          <h3 style="margin: 30px 0 16px; color: #303133;">入口方式对比</h3>
+          
+          <div class="feature-item">
+            <div class="feature-icon">1</div>
+            <div class="feature-content">
+              <h4>方式一：独立菜单项</h4>
+              <p>在菜单栏添加独立的"内存分析"按钮，点击后弹出全屏或侧边栏分析面板。视觉突出，便于快速访问。</p>
+            </div>
+          </div>
+
+          <div class="feature-item" style="border: 2px solid #667eea;">
+            <div class="feature-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">✓</div>
+            <div class="feature-content">
+              <h4>方式二："更多"下拉菜单（推荐）</h4>
+              <p>将内存分析功能放在"更多"下拉菜单中，保持菜单简洁，与导入/导出/日志等功能分组。当前已采用此方案。</p>
+            </div>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-icon">3</div>
+            <div class="feature-content">
+              <h4>方式三：对话框模式</h4>
+              <p>作为模式对话框展示，适合需要聚焦分析的临时性查看，不影响主界面布局。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 技术实现提示 -->
+      <div class="design-card">
+        <h2>🔧 技术实现提示</h2>
+        
+        <h3 style="margin: 20px 0 16px; color: #303133;">后端命令</h3>
+        <div class="code-example">
+<span class="code-comment">// Redis INFO memory 命令返回的关键指标</span>
+<span class="code-keyword">used_memory</span>: <span class="code-number">1342177280</span>              <span class="code-comment">// 已用内存（字节）</span>
+<span class="code-keyword">used_memory_human</span>: <span class="code-string">"1.25G"</span>           <span class="code-comment">// 人类可读格式</span>
+<span class="code-keyword">used_memory_peak</span>: <span class="code-number">1589648384</span>          <span class="code-keyword">string</span>
+<span class="code-keyword">used_memory_peak_human</span>: <span class="code-string">"1.48G"</span>
+<span class="code-keyword">mem_fragmentation_ratio</span>: <span class="code-number">1.42</span>       <span class="code-comment">// 内存碎片率</span>
+<span class="code-keyword">maxmemory</span>: <span class="code-number">2147483648</span>                <span class="code-comment">// 最大内存限制</span>
+
+<span class="code-comment">// 使用 DEBUG OBJECT 或 SCAN + TYPE 统计键类型</span>
+<span class="code-function">SCAN</span> <span class="code-number">0</span> COUNT <span class="code-number">1000</span>
+<span class="code-function">TYPE</span> key_name
+        </div>
+
+        <h3 style="margin: 30px 0 16px; color: #303133;">数据流设计</h3>
+        <div class="code-example">
+<span class="code-comment">1. 前端请求 → Tauri Command (get_memory_info)</span>
+<span class="code-comment">2. Rust 后端执行 → redis::cmd("INFO").arg("memory")</span>
+<span class="code-comment">3. 解析响应 → 转换为结构化 JSON</span>
+<span class="code-comment">4. 前端渲染 → 仪表盘组件</span>
+
+<span class="code-comment">// 异步扫描大键（防止阻塞）</span>
+<span class="code-function">SCAN</span> <span class="code-number">0</span> COUNT <span class="code-number">100</span>  <span class="code-comment">// 分批扫描</span>
+<span class="code-function">DEBUG</span> OBJECT <span class="code-keyword">ENCODING</span> key  <span class="code-comment">// 获取对象内存占用</span>
+        </div>
+      </div>
+
+      <!-- 下一步 -->
+      <div class="design-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+        <h2 style="color: white; border-bottom-color: rgba(255,255,255,0.3);">🚀 下一步</h2>
+        
+        <div style="margin-top: 30px;">
+          <p style="font-size: 18px; margin-bottom: 20px;">这个设计方案是否符合您的预期？我现在可以：</p>
+          
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-top: 24px;">
+            <div style="background: rgba(255,255,255,0.1); padding: 24px; border-radius: 12px;">
+              <h4 style="margin-bottom: 12px;">✨ 调整细节</h4>
+              <p style="font-size: 14px; opacity: 0.9;">修改指标、展示方式或交互逻辑</p>
+            </div>
+            
+            <div style="background: rgba(255,255,255,0.1); padding: 24px; border-radius: 12px;">
+              <h4 style="margin-bottom: 12px;">📝 编写设计文档</h4>
+              <p style="font-size: 14px; opacity: 0.9;">生成完整的设计规范文档</p>
+            </div>
+            
+            <div style="background: rgba(255,255,255,0.1); padding: 24px; border-radius: 12px;">
+              <h4 style="margin-bottom: 12px;">💻 开始实现</h4>
+              <p style="font-size: 14px; opacity: 0.9;">基于设计开始代码实现</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed } = Vue
+    const app = createApp({
+      data() {
+        return {
+          message: 'Redis 内存分析功能设计',
+          sortOrder: 'desc',
+          keyMemoryList: [
+            { key: 'TripDTO_50822_hasUsers', size: '17.78KB' },
+            { key: 'BaseTaskDTO_880307', size: '7.42KB' },
+            { key: 'BaseTaskDTO_880590', size: '7.42KB' },
+            { key: 'BaseTaskDTO_887160', size: '6.68KB' },
+            { key: 'BaseTaskDTO_895527', size: '6.66KB' },
+            { key: 'BaseTaskDTO_880609', size: '6.6KB' },
+            { key: 'BaseTaskDTO_880326', size: '6.6KB' },
+            { key: 'BaseTaskDTO_783291', size: '6.43KB' },
+            { key: 'BaseTaskDTO_880306', size: '6.38KB' },
+            { key: 'BaseTaskDTO_880589', size: '6.38KB' },
+            { key: 'BaseTaskDTO_784070', size: '6.16KB' },
+            { key: 'BaseTaskDTO_893956', size: '5.71KB' },
+            { key: 'BaseTaskDTO_887118', size: '5.63KB' },
+            { key: 'BaseTaskDTO_895475', size: '5.61KB' },
+            { key: 'BaseTaskDTO_893680', size: '5.59KB' },
+            { key: 'BaseTaskDTO_894100', size: '5.59KB' },
+            { key: 'BaseTaskDTO_894892', size: '5.59KB' },
+            { key: 'BaseTaskDTO_825228', size: '5.51KB' },
+            { key: 'BaseTaskDTO_880600', size: '5.21KB' },
+            { key: 'BaseTaskDTO_880317', size: '5.21KB' },
+          ]
+        }
+      },
+      computed: {
+        sortedKeyMemoryList() {
+          const list = [...this.keyMemoryList]
+          if (this.sortOrder === 'asc') {
+            return list.sort((a, b) => this.parseSize(a.size) - this.parseSize(b.size))
+          } else {
+            return list.sort((a, b) => this.parseSize(b.size) - this.parseSize(a.size))
+          }
+        }
+      },
+      methods: {
+        parseSize(sizeStr) {
+          const match = sizeStr.match(/^([\d.]+)\s*(KB|MB|GB)$/i)
+          if (!match) return 0
+          const value = parseFloat(match[1])
+          const unit = match[2].toUpperCase()
+          switch (unit) {
+            case 'GB': return value * 1024 * 1024
+            case 'MB': return value * 1024
+            case 'KB': return value
+            default: return value
+          }
+        },
+        toggleSort() {
+          this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc'
+        },
+        refreshList() {
+          alert('重新扫描内存数据...')
+        }
+      }
+    })
+    app.mount('#app')
+  </script>
+</body>
+</html>

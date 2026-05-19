@@ -82,6 +82,9 @@
               <el-dropdown-item command="generateTestData">
                 <el-icon><Plus /></el-icon> 生成测试数据
               </el-dropdown-item>
+              <el-dropdown-item command="memory" divided>
+                <el-icon><DataAnalysis /></el-icon> 内存分析
+              </el-dropdown-item>
               <el-dropdown-item command="log" divided>
                 <el-icon><Document /></el-icon> 日志
               </el-dropdown-item>
@@ -629,12 +632,18 @@
 
     <!-- 日志对话框 -->
     <LogDialog v-model="showLogDialog" />
+    
+    <!-- 内存分析对话框 -->
+    <MemoryDialog 
+      v-model="showMemoryDialog" 
+      ref="memoryDialogRef"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown, Check, Document } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown, Check, Document, DataAnalysis } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
 import { trashStore } from '../stores/trashStore'
@@ -642,12 +651,15 @@ import { ElMessageBox } from 'element-plus'
 import ServerConfigView from './ServerConfigView.vue'
 import TabBar from '../components/TabBar.vue'
 import LogDialog from '../components/LogDialog.vue'
+import MemoryDialog from '../components/MemoryDialog.vue'
 import { sessionManager } from '../sessions/SessionManager'
 import { isTauriEnv } from '../utils/tauri'
 import { useLogStore } from '../stores/logStore'
 
 const logStore = useLogStore()
 const showLogDialog = ref(false)
+const showMemoryDialog = ref(false)
+const memoryDialogRef = ref<InstanceType<typeof MemoryDialog> | null>(null)
 
 // 简化的 Tauri 环境检测
 function checkIsTauri(): boolean {
@@ -933,9 +945,43 @@ const handleActionCommand = (command: string) => {
     case 'generateTestData':
       handleGenerateTestData()
       break
+    case 'memory':
+      handleOpenMemory()
+      break
     case 'log':
       handleOpenLog()
       break
+  }
+}
+
+// 打开内存分析对话框
+const handleOpenMemory = async () => {
+  const srv = selectedServer.value
+  const db = selectedDb.value
+  
+  if (!srv) {
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = '请先连接到一个 Redis 服务器'
+    return
+  }
+  
+  if (db === null) {
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = '请先选择一个数据库'
+    return
+  }
+  
+  showMemoryDialog.value = true
+  
+  // 加载内存信息
+  await nextTick()
+  if (memoryDialogRef.value) {
+    await memoryDialogRef.value.load({
+      host: srv.host,
+      port: srv.port,
+      password: srv.password,
+      db: db
+    })
   }
 }
 

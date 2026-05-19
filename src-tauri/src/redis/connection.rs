@@ -1,4 +1,5 @@
 use redis::{Client, Commands, Connection};
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 
 pub struct RedisConnection {
@@ -171,6 +172,135 @@ impl RedisConnection {
             .collect();
         Ok(entries)
     }
+
+    /// 获取内存基本信息
+    pub fn get_memory_info(&mut self) -> Result<MemoryInfo, Box<dyn Error>> {
+        let info_str: String = redis::cmd("INFO")
+            .arg("memory")
+            .query(&mut self.conn)?;
+        
+        let mut info_map = std::collections::HashMap::new();
+        for line in info_str.lines() {
+            if let Some(idx) = line.find(':') {
+                let key = line[..idx].trim().to_string();
+                let value = line[idx + 1..].trim().to_string();
+                info_map.insert(key, value);
+            }
+        }
+        
+        let used_memory: u64 = info_map.get("used_memory")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let used_memory_peak: u64 = info_map.get("used_memory_peak")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let mem_fragmentation_ratio: f64 = info_map.get("mem_fragmentation_ratio")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+        let maxmemory: u64 = info_map.get("maxmemory")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        
+        Ok(MemoryInfo {
+            used_memory,
+            used_memory_human: Self::format_bytes(used_memory),
+            used_memory_peak,
+            used_memory_peak_human: Self::format_bytes(used_memory_peak),
+            mem_fragmentation_ratio,
+            maxmemory,
+        })
+    }
+
+    /// 辅助函数：格式化字节数为人类可读格式
+    fn format_bytes(bytes: u64) -> String {
+        const KB: u64 = 1024;
+        const MB: u64 = KB * 1024;
+        const GB: u64 = MB * 1024;
+        
+        if bytes >= GB {
+            format!("{:.2}GB", bytes as f64 / GB as f64)
+        } else if bytes >= MB {
+            format!("{:.2}MB", bytes as f64 / MB as f64)
+        } else if bytes >= KB {
+            format!("{:.2}KB", bytes as f64 / KB as f64)
+        } else {
+            format!("{}B", bytes)
+        }
+    }
+
+    /// 扫描并获取所有键的内存信息
+    pub fn scan_keys_memory(&mut self) -> Result<(Vec<KeyMemoryItem>, Vec<KeyTypeStat>, usize), Box<dyn Error>> {
+        let mut key_memory_list = Vec::new();
+        let mut type_stats: std::collections::HashMap<String, (usize, u64)> = std::collections::HashMap::new();
+        let mut cursor = 0;
+        let mut total_keys = 0;
+        
+        loop {
+            let (new_cursor, keys): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("COUNT")
+                .arg(100)
+                .query(&mut self.conn)?;
+            
+            cursor = new_cursor;
+            total_keys += keys.len();
+            
+            for key in keys {
+                let key_type: String = redis::cmd("TYPE")
+                    .arg(&key)
+                    .query(&mut self.conn)?;
+                
+                let size: Option<u64> = redis::cmd("MEMORY")
+                    .arg("USAGE")
+                    .arg(&key)
+                    .query(&mut self.conn)
+                    .ok();
+                
+                let size = size.unwrap_or(0);
+                
+                key_memory_list.push(KeyMemoryItem {
+                    key: key.clone(),
+                    size,
+                    size_human: Self::format_bytes(size),
+                    key_type: key_type.clone(),
+                });
+                
+                let entry = type_stats.entry(key_type.clone()).or_insert((0, 0));
+                entry.0 += 1;
+                entry.1 += size;
+            }
+            
+            if cursor == 0 {
+                break;
+            }
+        }
+        
+        key_memory_list.sort_by(|a, b| b.size.cmp(&a.size));
+        
+        let large_keys_count = key_memory_list.len();
+        // 不截断列表，让前端分页处理
+        // key_memory_list.truncate(100);
+        
+        let total_memory: u64 = type_stats.values().map(|(_, m)| m).sum();
+        let key_type_stats: Vec<KeyTypeStat> = type_stats
+            .into_iter()
+            .map(|(key_type, (count, memory_bytes))| {
+                let memory_percent = if total_memory > 0 {
+                    memory_bytes as f64 / total_memory as f64 * 100.0
+                } else {
+                    0.0
+                };
+                KeyTypeStat {
+                    key_type,
+                    count,
+                    memory_bytes,
+                    memory_percent,
+                }
+            })
+            .collect();
+        
+        Ok((key_memory_list, key_type_stats, total_keys))
+    }
 }
 
 /// SLOWLOG 原始条目（内部解析用，不含 Serialize）
@@ -181,6 +311,35 @@ pub struct SlowlogRaw {
     pub cmd: String,
     pub args: Vec<String>,
     pub client: String,
+}
+
+/// 内存基本信息
+#[derive(Debug, Clone)]
+pub struct MemoryInfo {
+    pub used_memory: u64,
+    pub used_memory_human: String,
+    pub used_memory_peak: u64,
+    pub used_memory_peak_human: String,
+    pub mem_fragmentation_ratio: f64,
+    pub maxmemory: u64,
+}
+
+/// 单个键的内存信息
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KeyMemoryItem {
+    pub key: String,
+    pub size: u64,
+    pub size_human: String,
+    pub key_type: String,
+}
+
+/// 键类型统计
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KeyTypeStat {
+    pub key_type: String,
+    pub count: usize,
+    pub memory_bytes: u64,
+    pub memory_percent: f64,
 }
 
 fn parse_slowlog_entry(items: Vec<redis::Value>) -> SlowlogRaw {

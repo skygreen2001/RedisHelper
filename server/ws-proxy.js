@@ -352,6 +352,127 @@ const handlers = {
       }))
     })
   },
+
+  // 获取内存分析信息
+  async get_memory_info({ host, port, password, db }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      console.log(`[ws-proxy][memory] 开始分析 ${host}:${port} db=${db} 的内存...`)
+
+      // 获取内存基本信息
+      const info = await conn.info('memory')
+      const lines = info.split('\n')
+      const infoMap = {}
+      for (const line of lines) {
+        const idx = line.indexOf(':')
+        if (idx > 0) {
+          const key = line.substring(0, idx).trim()
+          const value = line.substring(idx + 1).trim()
+          infoMap[key] = value
+        }
+      }
+
+      const usedMemory = parseInt(infoMap['used_memory']) || 0
+      const usedMemoryPeak = parseInt(infoMap['used_memory_peak']) || 0
+      const memFragmentationRatio = parseFloat(infoMap['mem_fragmentation_ratio']) || 0
+      const maxmemory = parseInt(infoMap['maxmemory']) || 0
+
+      // 格式化字节数
+      function formatBytes(bytes) {
+        const KB = 1024
+        const MB = KB * 1024
+        const GB = MB * 1024
+
+        if (bytes >= GB) {
+          return (bytes / GB).toFixed(2) + 'GB'
+        } else if (bytes >= MB) {
+          return (bytes / MB).toFixed(2) + 'MB'
+        } else if (bytes >= KB) {
+          return (bytes / KB).toFixed(2) + 'KB'
+        } else {
+          return bytes + 'B'
+        }
+      }
+
+      // 扫描所有键的内存信息
+      const keyMemoryList = []
+      const typeStats = {}
+      let cursor = '0'
+      let totalKeys = 0
+
+      do {
+        const [newCursor, keys] = await conn.scan(cursor, 'COUNT', 100)
+        cursor = newCursor
+        totalKeys += keys.length
+
+        for (const key of keys) {
+          try {
+            const keyType = await conn.type(key)
+            let size = 0
+
+            // 获取键的内存占用
+            try {
+              size = await conn.memory('USAGE', key) || 0
+            } catch {
+              // 某些键可能无法获取内存信息
+              size = 0
+            }
+
+            keyMemoryList.push({
+              key,
+              size,
+              size_human: formatBytes(size),
+              key_type: keyType
+            })
+
+            // 统计类型
+            if (!typeStats[keyType]) {
+              typeStats[keyType] = { count: 0, memory_bytes: 0 }
+            }
+            typeStats[keyType].count++
+            typeStats[keyType].memory_bytes += size
+          } catch (err) {
+            console.error(`[ws-proxy][memory] 处理键 ${key} 失败:`, err.message)
+          }
+        }
+      } while (cursor !== '0')
+
+      // 按内存大小排序
+      keyMemoryList.sort((a, b) => b.size - a.size)
+
+      // 不限制返回数量，让前端分页处理
+      const largeKeysCount = keyMemoryList.length
+      const limitedKeyMemoryList = keyMemoryList // 不截断
+
+      // 计算类型统计
+      const totalMemory = Object.values(typeStats).reduce((sum, stat) => sum + stat.memory_bytes, 0)
+      const keyTypeStats = Object.entries(typeStats).map(([keyType, stat]) => ({
+        key_type: keyType,
+        count: stat.count,
+        memory_bytes: stat.memory_bytes,
+        memory_percent: totalMemory > 0 ? (stat.memory_bytes / totalMemory * 100) : 0
+      }))
+
+      // 计算过期键占比（简化计算）
+      const expiredKeysRatio = 0
+
+      const result = {
+        used_memory: usedMemory,
+        used_memory_human: formatBytes(usedMemory),
+        used_memory_peak: usedMemoryPeak,
+        used_memory_peak_human: formatBytes(usedMemoryPeak),
+        mem_fragmentation_ratio: memFragmentationRatio,
+        maxmemory: maxmemory,
+        keys_count: totalKeys,
+        expired_keys_ratio: expiredKeysRatio,
+        large_keys_count: largeKeysCount,
+        key_memory_list: limitedKeyMemoryList,
+        key_type_stats: keyTypeStats
+      }
+
+      console.log(`[ws-proxy][memory] 内存分析完成: ${totalKeys} 个键，${largeKeysCount} 个大键`)
+      return result
+    })
+  },
 }
 
 // WebSocket 服务器

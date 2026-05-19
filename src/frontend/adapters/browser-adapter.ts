@@ -389,6 +389,7 @@ const PROXY_COMMANDS = new Set([
   'generate_test_data',
   'test_connection',
   'slowlog_get',
+  'get_memory_info',
 ])
 
 // ========== 需要通过 localStorage 的服务器命令 ==========

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::redis::connection::{RedisConnection, SlowlogRaw};
+use crate::redis::connection::{RedisConnection, SlowlogRaw, KeyMemoryItem, KeyTypeStat, MemoryInfo};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConnectRequest {
@@ -265,15 +265,77 @@ const SLOWLOG_NOISE_CMDS: &[&str] = &[
 pub fn slowlog_get(req: SlowlogRequest) -> Result<Vec<SlowlogEntry>, String> {
     match RedisConnection::new(&req.host, req.port, req.password) {
         Ok(mut conn) => {
-            // 不调用 SELECT，SLOWLOG 是全局的，不需要选库
             let raw_entries = conn.slowlog_get().map_err(|e| e.to_string())?;
-            // 服务端过滤噪音命令 + 转为可序列化类型
             let filtered: Vec<SlowlogEntry> = raw_entries
                 .into_iter()
                 .filter(|e| !SLOWLOG_NOISE_CMDS.contains(&e.cmd.to_uppercase().as_str()))
                 .map(SlowlogEntry::from)
                 .collect();
             Ok(filtered)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// 内存分析响应结构
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MemoryInfoResponse {
+    pub used_memory: u64,
+    pub used_memory_human: String,
+    pub used_memory_peak: u64,
+    pub used_memory_peak_human: String,
+    pub mem_fragmentation_ratio: f64,
+    pub maxmemory: u64,
+    pub keys_count: usize,
+    pub expired_keys_ratio: f64,
+    pub large_keys_count: usize,
+    pub key_memory_list: Vec<KeyMemoryItem>,
+    pub key_type_stats: Vec<KeyTypeStat>,
+}
+
+impl From<MemoryInfo> for MemoryInfoResponse {
+    fn from(info: MemoryInfo) -> Self {
+        Self {
+            used_memory: info.used_memory,
+            used_memory_human: info.used_memory_human,
+            used_memory_peak: info.used_memory_peak,
+            used_memory_peak_human: info.used_memory_peak_human,
+            mem_fragmentation_ratio: info.mem_fragmentation_ratio,
+            maxmemory: info.maxmemory,
+            keys_count: 0,
+            expired_keys_ratio: 0.0,
+            large_keys_count: 0,
+            key_memory_list: vec![],
+            key_type_stats: vec![],
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_memory_info(req: ConnectRequest) -> Result<MemoryInfoResponse, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            
+            let memory_info = conn.get_memory_info().map_err(|e| e.to_string())?;
+            
+            let (key_memory_list, key_type_stats, keys_count) = 
+                conn.scan_keys_memory().map_err(|e| e.to_string())?;
+            
+            let expired_keys_ratio = if keys_count > 0 {
+                (key_memory_list.iter().filter(|item| item.size > 0).count() as f64 / keys_count as f64) * 100.0
+            } else {
+                0.0
+            };
+            
+            let mut response: MemoryInfoResponse = MemoryInfoResponse::from(memory_info);
+            response.keys_count = keys_count;
+            response.expired_keys_ratio = expired_keys_ratio;
+            response.large_keys_count = key_memory_list.len();
+            response.key_memory_list = key_memory_list;
+            response.key_type_stats = key_type_stats;
+            
+            Ok(response)
         }
         Err(e) => Err(e.to_string()),
     }

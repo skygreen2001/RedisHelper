@@ -48,6 +48,34 @@ interface KeyValueResponse {
   key_type: string
 }
 
+export interface KeyMemoryItem {
+  key: string
+  size: number
+  size_human: string
+  key_type: string
+}
+
+export interface KeyTypeStat {
+  key_type: string
+  count: number
+  memory_bytes: number
+  memory_percent: number
+}
+
+export interface MemoryInfoResponse {
+  used_memory: number
+  used_memory_human: string
+  used_memory_peak: number
+  used_memory_peak_human: string
+  mem_fragmentation_ratio: number
+  maxmemory: number
+  keys_count: number
+  expired_keys_ratio: number
+  large_keys_count: number
+  key_memory_list: KeyMemoryItem[]
+  key_type_stats: KeyTypeStat[]
+}
+
 export const redisStore = defineStore('redis', {
   state: () => ({
     isConnected: false
@@ -170,6 +198,15 @@ export const redisStore = defineStore('redis', {
         return await safeInvoke<boolean>('generate_test_data', { req: params, count })
       } catch (error) {
         console.error('生成测试数据失败:', error)
+        throw error
+      }
+    },
+
+    async getMemoryInfo(params: ConnectRequest): Promise<MemoryInfoResponse> {
+      try {
+        return await safeInvoke<MemoryInfoResponse>('get_memory_info', { req: params })
+      } catch (error) {
+        console.error('获取内存信息失败:', error)
         throw error
       }
     }
