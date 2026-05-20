@@ -331,6 +331,10 @@
               <el-icon><Edit /></el-icon>
               <span>修改</span>
             </el-button>
+            <el-button size="small" @click="refreshKeyValue" class="action-btn refresh-btn">
+              <el-icon><Refresh /></el-icon>
+              <span>刷新</span>
+            </el-button>
           </div>
         </div>
         <div v-else class="empty-state">
@@ -1397,6 +1401,18 @@ const loadKeyValue = async (key: string) => {
     sessionManager.active.messageType = 'error'
     sessionManager.active.message = `加载键值失败: ${error.message || error}`
   }
+}
+
+// 刷新当前键值
+const refreshKeyValue = async () => {
+  if (!selectedKey.value) {
+    sessionManager.active.messageType = 'warning'
+    sessionManager.active.message = '请先选择一个键'
+    return
+  }
+  await loadKeyValue(selectedKey.value)
+  sessionManager.active.messageType = 'success'
+  sessionManager.active.message = '刷新成功'
 }
 
 // 格式化JSON显示
