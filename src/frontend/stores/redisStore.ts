@@ -6,6 +6,7 @@ interface ConnectRequest {
   port: number
   password?: string
   db: number
+  limit?: number // 可选的键数量限制
 }
 
 interface KeyRequest {
@@ -76,6 +77,45 @@ export interface MemoryInfoResponse {
   key_type_stats: KeyTypeStat[]
 }
 
+export interface ServerInfoResponse {
+  redis_version: string
+  redis_git_sha1: string
+  redis_git_dirty: string
+  redis_build_id: string
+  redis_mode: string
+  os: string
+  arch_bits: string
+  multiplexing_api: string
+  atomicvar_api: string
+  gcc_version: string
+  process_id: string
+  process_supervised: string
+  run_id: string
+  tcp_port: string
+  server_time_usec: string
+  uptime_in_seconds: string
+  uptime_in_days: string
+  hz: string
+  configured_hz: string
+  lru_clock: string
+  executable: string
+  config_file: string
+  [key: string]: string
+}
+
+export interface KeyStatItem {
+  db: string
+  keys: number
+  expires: number
+  avg_ttl: number
+}
+
+export interface InfoSection {
+  key: string
+  value: string
+  section: string
+}
+
 export const redisStore = defineStore('redis', {
   state: () => ({
     isConnected: false
@@ -103,9 +143,9 @@ export const redisStore = defineStore('redis', {
       }
     },
     
-    async getKeys(params: ConnectRequest): Promise<string[]> {
+    async getKeys(params: ConnectRequest): Promise<{ keys: string[]; total: number }> {
       try {
-        return await safeInvoke<string[]>('get_keys', { req: params })
+        return await safeInvoke<{ keys: string[]; total: number }>('get_keys', { req: params })
       } catch (error) {
         console.error('获取键失败:', error)
         throw error
@@ -207,6 +247,24 @@ export const redisStore = defineStore('redis', {
         return await safeInvoke<MemoryInfoResponse>('get_memory_info', { req: params })
       } catch (error) {
         console.error('获取内存信息失败:', error)
+        throw error
+      }
+    },
+
+    async getServerInfo(params: ConnectRequest): Promise<ServerInfoResponse> {
+      try {
+        return await safeInvoke<ServerInfoResponse>('get_server_info', { req: params })
+      } catch (error) {
+        console.error('获取服务器信息失败:', error)
+        throw error
+      }
+    },
+
+    async getKeyStats(params: ConnectRequest): Promise<KeyStatItem[]> {
+      try {
+        return await safeInvoke<KeyStatItem[]>('get_key_stats', { req: params })
+      } catch (error) {
+        console.error('获取键值统计失败:', error)
         throw error
       }
     }

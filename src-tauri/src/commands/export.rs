@@ -36,10 +36,10 @@ pub fn export_data(req: ExportRequest) -> Result<bool, String> {
     match RedisConnection::new(&req.host, req.port, req.password) {
         Ok(mut conn) => {
             conn.select(req.db).map_err(|e| e.to_string())?;
-            let keys = conn.get_keys().map_err(|e| e.to_string())?;
+            let keys_response = conn.get_keys(None).map_err(|e| e.to_string())?;
             
             let mut data = Vec::new();
-            for key in keys {
+            for key in keys_response.keys {
                 match conn.get_key_value(&key) {
                     Ok((value, key_type)) => {
                         data.push(serde_json::json!({

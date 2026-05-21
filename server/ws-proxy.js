@@ -135,10 +135,99 @@ const handlers = {
     })
   },
 
-  // 获取所有键
-  async get_keys({ host, port, password, db }) {
+  // 获取服务器信息
+  async get_server_info({ host, port, password, db }) {
     return executeRedisCommand(host, port, password, db, async (conn) => {
-      return conn.keys('*')
+      // 使用 INFO 命令获取服务器信息
+      const info = await conn.info()
+      console.log(`[ws-proxy] 获取服务器信息成功, 类型:`, typeof info)
+      
+      // 如果已经是对象，直接返回
+      if (typeof info === 'object' && info !== null && !Array.isArray(info)) {
+        return info
+      }
+      
+      // 如果是字符串，解析成对象
+      if (typeof info === 'string') {
+        const result = {}
+        for (const line of info.split('\n')) {
+          if (!line || line.startsWith('#')) continue
+          if (line.includes(':')) {
+            const [key, ...valueParts] = line.split(':')
+            result[key.trim()] = valueParts.join(':').trim()
+          }
+        }
+        return result
+      }
+      
+      // 如果是其他类型，尝试转换为字符串再解析
+      return String(info)
+    })
+  },
+
+  // 获取键统计信息
+  async get_key_stats({ host, port, password }) {
+    return executeRedisCommand(host, port, password, 0, async (conn) => {
+      const info = await conn.info('keyspace')
+      console.log(`[ws-proxy] get_key_stats INFO keyspace 返回:`, info, typeof info)
+      
+      // 解析 keyspace 信息
+      const stats = []
+      
+      // INFO 命令可能返回字符串或对象
+      let lines = []
+      if (typeof info === 'string') {
+        lines = info.split('\n')
+      } else if (typeof info === 'object' && info !== null) {
+        // 如果是对象，尝试转换为字符串处理
+        lines = String(info).split('\n')
+      }
+      
+      for (const line of lines) {
+        if (!line || line.startsWith('#')) continue
+        if (line.includes(':')) {
+          const [dbKey, value] = line.split(':')
+          const dbNum = parseInt(dbKey.replace('db', ''), 10)
+          
+          let keys = 0, expires = 0, avgTtl = 0
+          for (const part of value.split(',')) {
+            const [k, v] = part.split('=')
+            if (k === 'keys') keys = parseInt(v, 10)
+            if (k === 'expires') expires = parseInt(v, 10)
+            if (k === 'avg_ttl') avgTtl = parseInt(v, 10)
+          }
+          
+          stats.push({
+            db: dbNum,
+            keys,
+            expires,
+            avg_ttl: avgTtl
+          })
+        }
+      }
+      
+      return stats
+    })
+  },
+
+  // 获取所有键
+  async get_keys({ host, port, password, db, limit }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      const allKeys = await conn.keys('*')
+      const total = allKeys.length
+      
+      // 如果有 limit 参数，只返回前 limit 个
+      if (limit && limit > 0) {
+        return {
+          keys: allKeys.slice(0, limit),
+          total
+        }
+      }
+      
+      return {
+        keys: allKeys,
+        total
+      }
     })
   },
 

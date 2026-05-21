@@ -1,9 +1,43 @@
 use redis::{Client, Commands, Connection};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use crate::storage::config::debug_println;
+
+/// 获取键列表的响应结构
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KeysResponse {
+    pub keys: Vec<String>,
+    pub total: usize,
+}
+
+/// 连接缓存 - 按 host:port:password:db 缓存连接，使用 Mutex 保护
+struct ConnectionCache {
+    connections: HashMap<String, Connection>,
+}
+
+impl ConnectionCache {
+    fn new() -> Self {
+        Self {
+            connections: HashMap::new(),
+        }
+    }
+}
+
+// 全局连接缓存
+static CONNECTION_CACHE: std::sync::OnceLock<Mutex<ConnectionCache>> = 
+    std::sync::OnceLock::new();
+
+fn get_cache() -> &'static Mutex<ConnectionCache> {
+    CONNECTION_CACHE.get_or_init(|| Mutex::new(ConnectionCache::new()))
+}
 
 pub struct RedisConnection {
-    conn: Connection,
+    host: String,
+    port: u16,
+    password: Option<String>,
+    db: u8,
 }
 
 impl RedisConnection {
@@ -17,65 +51,222 @@ impl RedisConnection {
         let mut conn = client.get_connection()?;
         
         // 发送 AUTH 命令如果有密码
-        if let Some(pass) = password {
+        if let Some(ref pass) = password {
             let _: () = redis::cmd("AUTH").arg(pass).query(&mut conn)?;
         }
         
-        Ok(Self { conn })
+        // 缓存连接
+        let cache_key = format!("{}:{}:{}:{}", host, port, 
+            password.as_ref().map(|s| s.as_str()).unwrap_or(""), 0);
+        let mut cache = get_cache().lock().unwrap();
+        cache.connections.insert(cache_key, conn);
+        
+        Ok(Self { 
+            host: host.to_string(), 
+            port, 
+            password, 
+            db: 0 
+        })
+    }
+    
+    /// 从缓存获取或创建连接
+    pub fn from_cache(host: &str, port: u16, password: Option<&str>, db: u8) 
+        -> Result<Self, Box<dyn Error>> {
+        let cache_key = format!("{}:{}:{}:{}", host, port, 
+            password.unwrap_or(""), db);
+        
+        let mut cache = get_cache().lock().unwrap();
+        
+        // 检查缓存
+        if let Some(_conn) = cache.connections.get_mut(&cache_key) {
+            // 验证连接是否存活
+            let result: Result<String, _> = redis::cmd("PING").query(_conn);
+            match result {
+                Ok(_) => {
+                    debug_println!("[DEBUG] 连接池: 复用现有连接 {}", cache_key);
+                    return Ok(Self { 
+                        host: host.to_string(), 
+                        port, 
+                        password: password.map(|s| s.to_string()), 
+                        db 
+                    });
+                }
+                Err(_) => {
+                    debug_println!("[DEBUG] 连接池: 连接已失效，移除 {}", cache_key);
+                    cache.connections.remove(&cache_key);
+                }
+            }
+        }
+        
+        // 创建新连接
+        debug_println!("[DEBUG] 连接池: 创建新连接 {}", cache_key);
+        let url = match password {
+            Some(pass) => format!("redis://:{}@{}:{}", pass, host, port),
+            None => format!("redis://{}:{}", host, port),
+        };
+        
+        let client = Client::open(url)?;
+        let mut conn = client.get_connection()?;
+        
+        // 选择数据库
+        let _: () = redis::cmd("SELECT").arg(db).query(&mut conn)?;
+        
+        cache.connections.insert(cache_key, conn);
+        
+        Ok(Self { 
+            host: host.to_string(), 
+            port, 
+            password: password.map(|s| s.to_string()), 
+            db 
+        })
+    }
+    
+    /// 获取连接缓存的 key
+    fn cache_key(&self) -> String {
+        format!("{}:{}:{}:{}", self.host, self.port, 
+            self.password.as_ref().map(|s| s.as_str()).unwrap_or(""), self.db)
     }
     
     pub fn select(&mut self, db: u8) -> Result<(), Box<dyn Error>> {
-        let _: () = redis::cmd("SELECT").arg(db).query(&mut self.conn)?;
+        self.db = db;
+        let key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        if let Some(conn) = cache.connections.get_mut(&key) {
+            let _: () = redis::cmd("SELECT").arg(db).query(conn)?;
+        }
         Ok(())
     }
     
     pub fn ping(&mut self) -> Result<(), Box<dyn Error>> {
-        let _: String = redis::cmd("PING").query(&mut self.conn)?;
+        let key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        if let Some(conn) = cache.connections.get_mut(&key) {
+            let _: String = redis::cmd("PING").query(conn)?;
+        }
         Ok(())
     }
     
     pub fn get_databases(&mut self) -> Result<Vec<(u8, usize)>, Box<dyn Error>> {
+        let key = format!("{}:{}:{}:{}", self.host, self.port, 
+            self.password.as_ref().map(|s| s.as_str()).unwrap_or(""), 0);
+        
         let mut databases = Vec::new();
         
-        // 尝试检查0-15号数据库，只返回有key的数据库
-        for db in 0..16 {
-            self.select(db)?;
-            let keys: Vec<String> = self.conn.keys("*")?;
-            if !keys.is_empty() {
-                databases.push((db, keys.len()));
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        // 使用 INFO keyspace 获取数据库统计，这比逐个遍历数据库执行 KEYS * 高效得多
+        let info_str: String = redis::cmd("INFO").arg("keyspace").query(conn)?;
+        
+        drop(cache); // 释放锁
+        
+        for line in info_str.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(idx) = line.find(':') {
+                let db_key = line[..idx].trim().to_string();
+                let value = line[idx + 1..].trim().to_string();
+                
+                // 解析格式: keys=10,expires=2,avg_ttl=3600
+                let mut keys = 0;
+                for part in value.split(',') {
+                    let kv: Vec<_> = part.split('=').collect();
+                    if kv.len() == 2 && kv[0] == "keys" {
+                        keys = kv[1].parse().unwrap_or(0);
+                        break;
+                    }
+                }
+                
+                // 只添加有键的数据库
+                if keys > 0 {
+                    // 从 "db0" 提取数据库编号
+                    if let Some(db_num) = db_key.strip_prefix("db") {
+                        if let Ok(db) = db_num.parse::<u8>() {
+                            databases.push((db, keys));
+                        }
+                    }
+                }
             }
         }
+        
+        // 按数据库编号排序
+        databases.sort_by(|a, b| a.0.cmp(&b.0));
         
         Ok(databases)
     }
     
-    pub fn get_keys(&mut self) -> Result<Vec<String>, Box<dyn Error>> {
-        let keys: Vec<String> = self.conn.keys("*")?;
-        Ok(keys)
+    pub fn get_keys(&mut self, limit: Option<usize>) -> Result<KeysResponse, Box<dyn Error>> {
+        let key = self.cache_key();
+        let mut keys = Vec::new();
+        let limit = limit.unwrap_or(0); // 0 表示不限制
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        // 获取数据库总键数（用于显示）
+        let total: usize = redis::cmd("DBSIZE").query(conn)?;
+        
+        // 使用 SCAN 命令替代 KEYS 命令，避免阻塞 Redis 服务器
+        let mut cursor = 0;
+        
+        loop {
+            let (new_cursor, batch): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("COUNT")
+                .arg(1000)
+                .query(conn)?;
+            
+            cursor = new_cursor;
+            keys.extend(batch);
+            
+            // 如果达到限制，停止扫描
+            if limit > 0 && keys.len() >= limit {
+                keys.truncate(limit);
+                break;
+            }
+            
+            if cursor == 0 {
+                break;
+            }
+        }
+        
+        Ok(KeysResponse { keys, total })
     }
     
     pub fn get_key_value(&mut self, key: &str) -> Result<(String, String), Box<dyn Error>> {
-        let key_type: String = redis::cmd("TYPE").arg(key).query(&mut self.conn)?;
+        let cache_key = self.cache_key();
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        let key_type: String = redis::cmd("TYPE").arg(key).query(conn)?;
         
         let value = match key_type.as_str() {
             "string" => {
-                let val: Option<String> = self.conn.get(key)?;
+                let val: Option<String> = conn.get(key)?;
                 val.unwrap_or_else(|| "".to_string())
             }
             "list" => {
-                let val: Vec<String> = self.conn.lrange(key, 0, -1)?;
+                let val: Vec<String> = conn.lrange(key, 0, -1)?;
                 serde_json::to_string(&val)?
             }
             "set" => {
-                let val: Vec<String> = self.conn.smembers(key)?;
+                let val: Vec<String> = conn.smembers(key)?;
                 serde_json::to_string(&val)?
             }
             "zset" => {
-                let val: Vec<(String, f64)> = self.conn.zrange_withscores(key, 0, -1)?;
+                let val: Vec<(String, f64)> = conn.zrange_withscores(key, 0, -1)?;
                 serde_json::to_string(&val)?
             }
             "hash" => {
-                let val: std::collections::HashMap<String, String> = self.conn.hgetall(key)?;
+                let val: std::collections::HashMap<String, String> = conn.hgetall(key)?;
                 serde_json::to_string(&val)?
             }
             _ => "".to_string(),
@@ -85,44 +276,51 @@ impl RedisConnection {
     }
     
     pub fn set_key_value(&mut self, key: &str, value: &str, key_type: &str) -> Result<(), Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
         match key_type {
             "string" => {
-                let _: () = self.conn.set(key, value)?;
+                let _: () = conn.set(key, value)?;
             }
             "list" => {
                 // 先删除旧值
-                let _: () = self.conn.del::<_, ()>(key)?;
+                let _: () = conn.del::<_, ()>(key)?;
                 // 解析JSON数组
                 let values: Vec<String> = serde_json::from_str(value)?;
                 for val in values {
-                    let _: () = self.conn.lpush::<_, _, ()>(key, val)?;
+                    let _: () = conn.lpush::<_, _, ()>(key, val)?;
                 }
             }
             "set" => {
                 // 先删除旧值
-                let _: () = self.conn.del::<_, ()>(key)?;
+                let _: () = conn.del::<_, ()>(key)?;
                 // 解析JSON数组
                 let values: Vec<String> = serde_json::from_str(value)?;
                 for val in values {
-                    let _: () = self.conn.sadd::<_, _, ()>(key, val)?;
+                    let _: () = conn.sadd::<_, _, ()>(key, val)?;
                 }
             }
             "zset" => {
                 // 先删除旧值
-                let _: () = self.conn.del::<_, ()>(key)?;
+                let _: () = conn.del::<_, ()>(key)?;
                 // 解析JSON数组
                 let values: Vec<(String, f64)> = serde_json::from_str(value)?;
                 for (val, score) in values {
-                    let _: () = self.conn.zadd::<_, _, _, ()>(key, val, score)?;
+                    let _: () = conn.zadd::<_, _, _, ()>(key, val, score)?;
                 }
             }
             "hash" => {
                 // 先删除旧值
-                let _: () = self.conn.del::<_, ()>(key)?;
+                let _: () = conn.del::<_, ()>(key)?;
                 // 解析JSON对象
                 let values: std::collections::HashMap<String, String> = serde_json::from_str(value)?;
                 for (field, val) in values {
-                    let _: () = self.conn.hset::<_, _, _, ()>(key, field, val)?;
+                    let _: () = conn.hset::<_, _, _, ()>(key, field, val)?;
                 }
             }
             _ => {
@@ -134,7 +332,14 @@ impl RedisConnection {
     }
     
     pub fn delete_key(&mut self, key: &str) -> Result<(), Box<dyn Error>> {
-        let _: () = self.conn.del::<_, ()>(key)?;
+        let cache_key = self.cache_key();
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        let _: () = conn.del::<_, ()>(key)?;
         Ok(())
     }
 
@@ -142,24 +347,52 @@ impl RedisConnection {
         if keys.is_empty() {
             return Ok(());
         }
-        let _: () = redis::cmd("DEL").arg(keys).query(&mut self.conn)?;
+        
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        let _: () = redis::cmd("DEL").arg(keys).query(conn)?;
         Ok(())
     }
     
     pub fn search_keys(&mut self, pattern: &str) -> Result<Vec<String>, Box<dyn Error>> {
-        let keys: Vec<String> = self.conn.keys(pattern)?;
+        let cache_key = self.cache_key();
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        let keys: Vec<String> = conn.keys(pattern)?;
         Ok(keys)
     }
     
     pub fn flushdb(&mut self) -> Result<(), Box<dyn Error>> {
-        let _: () = redis::cmd("FLUSHDB").query(&mut self.conn)?;
+        let cache_key = self.cache_key();
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        let _: () = redis::cmd("FLUSHDB").query(conn)?;
         Ok(())
     }
 
     /// 获取 SLOWLOG 历史记录（只读，不修改 Redis 配置）
     /// Redis 7+ 返回格式: [id, timestamp_us, duration_us, [cmd, args...], client_addr, client_name]
     pub fn slowlog_get(&mut self) -> Result<Vec<SlowlogRaw>, Box<dyn Error>> {
-        let raw: Vec<redis::Value> = redis::cmd("SLOWLOG").arg("GET").arg(9999).query(&mut self.conn)?;
+        let cache_key = self.cache_key();
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        let raw: Vec<redis::Value> = redis::cmd("SLOWLOG").arg("GET").arg(9999).query(conn)?;
         let entries: Vec<SlowlogRaw> = raw
             .into_iter()
             .filter_map(|v| {
@@ -175,9 +408,18 @@ impl RedisConnection {
 
     /// 获取内存基本信息
     pub fn get_memory_info(&mut self) -> Result<MemoryInfo, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
         let info_str: String = redis::cmd("INFO")
             .arg("memory")
-            .query(&mut self.conn)?;
+            .query(conn)?;
+        
+        drop(cache); // 释放锁
         
         let mut info_map = std::collections::HashMap::new();
         for line in info_str.lines() {
@@ -211,6 +453,92 @@ impl RedisConnection {
         })
     }
 
+    /// 获取完整的服务器信息
+    pub fn get_server_info(&mut self) -> Result<std::collections::HashMap<String, String>, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        let info_str: String = redis::cmd("INFO").query(conn)?;
+        
+        drop(cache); // 释放锁
+        
+        let mut info_map = std::collections::HashMap::new();
+        for line in info_str.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(idx) = line.find(':') {
+                let key = line[..idx].trim().to_string();
+                let value = line[idx + 1..].trim().to_string();
+                info_map.insert(key, value);
+            }
+        }
+        
+        Ok(info_map)
+    }
+    
+    /// 获取有数据的数据库的键统计（使用 INFO keyspace 命令）
+    pub fn get_key_stats(&mut self) -> Result<Vec<KeyStatItem>, Box<dyn Error>> {
+        let key = format!("{}:{}:{}:{}", self.host, self.port, 
+            self.password.as_ref().map(|s| s.as_str()).unwrap_or(""), 0);
+        
+        let mut stats = Vec::new();
+        
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        
+        // 首先获取 INFO keyspace，它已经包含了所有数据库的键信息
+        let info_str: String = redis::cmd("INFO").arg("keyspace").query(conn)?;
+        
+        drop(cache); // 释放锁
+        
+        // 解析 keyspace 信息
+        for line in info_str.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(idx) = line.find(':') {
+                let db_key = line[..idx].trim().to_string();
+                let value = line[idx + 1..].trim().to_string();
+                
+                // 解析格式: keys=10,expires=2,avg_ttl=3600
+                let mut keys = 0;
+                let mut expires = 0;
+                let mut avg_ttl = 0;
+                
+                for part in value.split(',') {
+                    let kv: Vec<_> = part.split('=').collect();
+                    if kv.len() == 2 {
+                        match kv[0] {
+                            "keys" => keys = kv[1].parse().unwrap_or(0),
+                            "expires" => expires = kv[1].parse().unwrap_or(0),
+                            "avg_ttl" => avg_ttl = kv[1].parse().unwrap_or(0),
+                            _ => {}
+                        }
+                    }
+                }
+                
+                // 只添加有键的数据库
+                if keys > 0 {
+                    stats.push(KeyStatItem {
+                        db: db_key,
+                        keys,
+                        expires,
+                        avg_ttl: avg_ttl as u64,
+                    });
+                }
+            }
+        }
+        
+        Ok(stats)
+    }
+
     /// 辅助函数：格式化字节数为人类可读格式
     fn format_bytes(bytes: u64) -> String {
         const KB: u64 = 1024;
@@ -230,33 +558,53 @@ impl RedisConnection {
 
     /// 扫描并获取所有键的内存信息
     pub fn scan_keys_memory(&mut self) -> Result<(Vec<KeyMemoryItem>, Vec<KeyTypeStat>, usize), Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        
         let mut key_memory_list = Vec::new();
         let mut type_stats: std::collections::HashMap<String, (usize, u64)> = std::collections::HashMap::new();
-        let mut cursor = 0;
         let mut total_keys = 0;
         
+        // 逐批获取键，避免长时间锁定
         loop {
-            let (new_cursor, keys): (u64, Vec<String>) = redis::cmd("SCAN")
-                .arg(cursor)
-                .arg("COUNT")
-                .arg(100)
-                .query(&mut self.conn)?;
+            let batch_keys: Vec<String>;
+            let cursor: u64;
             
-            cursor = new_cursor;
-            total_keys += keys.len();
+            {
+                let mut cache = get_cache().lock().unwrap();
+                let conn = cache.connections.get_mut(&cache_key)
+                    .ok_or_else(|| Box::new(std::io::Error::new(
+                        std::io::ErrorKind::NotConnected, "连接不存在")))?;
+                
+                let result: (u64, Vec<String>) = redis::cmd("SCAN")
+                    .arg(0)  // 每次都从0开始扫描
+                    .arg("COUNT")
+                    .arg(100)
+                    .query(conn)?;
+                cursor = result.0;
+                batch_keys = result.1;
+            }
             
-            for key in keys {
-                let key_type: String = redis::cmd("TYPE")
-                    .arg(&key)
-                    .query(&mut self.conn)?;
-                
-                let size: Option<u64> = redis::cmd("MEMORY")
-                    .arg("USAGE")
-                    .arg(&key)
-                    .query(&mut self.conn)
-                    .ok();
-                
-                let size = size.unwrap_or(0);
+            total_keys += batch_keys.len();
+            
+            for key in batch_keys {
+                let (key_type, size) = {
+                    let mut cache = get_cache().lock().unwrap();
+                    let conn = cache.connections.get_mut(&cache_key)
+                        .ok_or_else(|| Box::new(std::io::Error::new(
+                            std::io::ErrorKind::NotConnected, "连接不存在")))?;
+                    
+                    let key_type: String = redis::cmd("TYPE")
+                        .arg(&key)
+                        .query(conn)?;
+                    
+                    let size: Option<u64> = redis::cmd("MEMORY")
+                        .arg("USAGE")
+                        .arg(&key)
+                        .query(conn)
+                        .ok();
+                    
+                    (key_type, size.unwrap_or(0))
+                };
                 
                 key_memory_list.push(KeyMemoryItem {
                     key: key.clone(),
@@ -276,10 +624,6 @@ impl RedisConnection {
         }
         
         key_memory_list.sort_by(|a, b| b.size.cmp(&a.size));
-        
-        let large_keys_count = key_memory_list.len();
-        // 不截断列表，让前端分页处理
-        // key_memory_list.truncate(100);
         
         let total_memory: u64 = type_stats.values().map(|(_, m)| m).sum();
         let key_type_stats: Vec<KeyTypeStat> = type_stats
@@ -340,6 +684,15 @@ pub struct KeyTypeStat {
     pub count: usize,
     pub memory_bytes: u64,
     pub memory_percent: f64,
+}
+
+/// 单个数据库的键统计
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KeyStatItem {
+    pub db: String,
+    pub keys: usize,
+    pub expires: usize,
+    pub avg_ttl: u64,
 }
 
 fn parse_slowlog_entry(items: Vec<redis::Value>) -> SlowlogRaw {

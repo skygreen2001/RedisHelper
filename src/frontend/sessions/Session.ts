@@ -58,7 +58,7 @@ export class Session {
 
   // 消息
   message = ''
-  messageType: 'success' | 'error' = 'error'
+  messageType: 'success' | 'error' | 'warning' = 'error'
 
   // 对话框
   showAddKeyDialog = false
@@ -121,7 +121,7 @@ export class Session {
   }
 
   /** 设置消息 */
-  setMessage(msg: string, type: 'success' | 'error' = 'error') {
+  setMessage(msg: string, type: 'success' | 'error' | 'warning' = 'error') {
     this.message = msg
     this.messageType = type
   }
@@ -154,9 +154,9 @@ export class Session {
   }
 
   async getKeys() {
-    if (!this.connParams) return []
-    const result = await safeInvoke<string[]>('get_keys', { req: this.connParams })
-    return result || []
+    if (!this.connParams) return { keys: [], total: 0 }
+    const result = await safeInvoke<{ keys: string[]; total: number }>('get_keys', { req: this.connParams })
+    return result || { keys: [], total: 0 }
   }
 
   async getKeyValue(key: string) {

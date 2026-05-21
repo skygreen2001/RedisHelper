@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::storage::config::{ConfigManager, ServerConfig};
+use crate::storage::config::{ConfigManager, ServerConfig, get_global_config_manager};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServerRequest {
@@ -78,6 +78,29 @@ pub fn get_servers() -> Result<Vec<ServerConfig>, String> {
 }
 
 #[tauri::command]
+pub fn save_server_order(servers: Vec<ServerRequest>) -> Result<Vec<ServerConfig>, String> {
+    let mut manager = ConfigManager::new().map_err(|e| e.to_string())?;
+    
+    let server_configs: Vec<ServerConfig> = servers.into_iter().map(|s| {
+        ServerConfig {
+            id: s.id,
+            name: s.name,
+            host: s.host,
+            port: s.port,
+            password: s.password,
+            db: s.db.unwrap_or(0),
+            readonly: s.readonly,
+            created: "".to_string(),
+            updated: chrono::Local::now().to_string(),
+        }
+    }).collect();
+    
+    manager.set_servers(server_configs);
+    manager.save().map_err(|e| e.to_string())?;
+    Ok(manager.get_servers())
+}
+
+#[tauri::command]
 pub fn test_connection(req: TestConnectionRequest) -> Result<TestConnectionResponse, String> {
     use crate::redis::connection::RedisConnection;
     
@@ -99,4 +122,18 @@ pub fn test_connection(req: TestConnectionRequest) -> Result<TestConnectionRespo
             message: format!("连接失败: {}", e),
         }),
     }
+}
+
+#[tauri::command]
+pub fn get_debug_log_enabled() -> Result<bool, String> {
+    let manager = get_global_config_manager().lock().unwrap();
+    Ok(manager.get_debug_log_enabled())
+}
+
+#[tauri::command]
+pub fn set_debug_log_enabled(enabled: bool) -> Result<bool, String> {
+    let mut manager = get_global_config_manager().lock().unwrap();
+    manager.set_debug_log_enabled(enabled);
+    manager.save().map_err(|e| e.to_string())?;
+    Ok(enabled)
 }

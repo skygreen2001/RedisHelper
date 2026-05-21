@@ -8,13 +8,19 @@
 
 let ws: WebSocket | null = null
 let wsReady = false
+let wsConnectPromise: Promise<WebSocket> | null = null  // 添加这个变量
 const pendingRequests = new Map<string, { resolve: (v: any) => void; reject: (e: any) => void }>()
 let requestId = 0
 
 async function ensureWs(): Promise<WebSocket> {
   if (ws && wsReady) return ws
   
-  return new Promise((resolve, reject) => {
+  // 如果已经有一个连接正在进行中，复用同一个 Promise
+  if (wsConnectPromise) {
+    return wsConnectPromise
+  }
+  
+  wsConnectPromise = new Promise((resolve, reject) => {
     const url = `ws://${window.location.hostname}:8765`
     console.log('[browser-adapter] 连接 WebSocket 代理:', url)
     const socket = new WebSocket(url)
@@ -22,6 +28,7 @@ async function ensureWs(): Promise<WebSocket> {
     
     socket.onopen = () => {
       wsReady = true
+      wsConnectPromise = null  // 连接成功后清空 Promise
       console.log('[browser-adapter] WebSocket 代理已连接')
       resolve(socket)
     }
@@ -45,21 +52,26 @@ async function ensureWs(): Promise<WebSocket> {
     
     socket.onclose = () => {
       wsReady = false
+      wsConnectPromise = null  // 连接关闭后清空 Promise
       console.log('[browser-adapter] WebSocket 代理已断开')
     }
     
     socket.onerror = () => {
       wsReady = false
+      wsConnectPromise = null  // 连接错误后清空 Promise
       reject(new Error('WebSocket 代理连接失败，请确保已启动: node server/ws-proxy.js'))
     }
     
     // 超时 5 秒
     setTimeout(() => {
       if (!wsReady) {
+        wsConnectPromise = null  // 超时后清空 Promise
         reject(new Error('WebSocket 代理连接超时'))
       }
     }, 5000)
   })
+  
+  return wsConnectPromise
 }
 
 async function wsProxyCall(command: string, args: Record<string, any>, extraArgs?: Record<string, any>): Promise<any> {
@@ -161,6 +173,14 @@ function handleServerCommands(command: string, args: any): any {
       if (idx >= 0) servers.splice(idx, 1)
       saveToStorage(SERVERS_KEY, servers)
       return servers
+    }
+
+    case 'save_server_order': {
+      // args.servers 是新的服务器顺序列表
+      const newServers = args.servers || []
+      // 直接保存新的顺序到 localStorage
+      saveToStorage(SERVERS_KEY, newServers)
+      return newServers
     }
 
     default:
@@ -390,6 +410,8 @@ const PROXY_COMMANDS = new Set([
   'test_connection',
   'slowlog_get',
   'get_memory_info',
+  'get_server_info',  // 添加这个命令
+  'get_key_stats',    // 添加这个命令
 ])
 
 // ========== 需要通过 localStorage 的服务器命令 ==========
@@ -399,6 +421,7 @@ const SERVER_COMMANDS = new Set([
   'add_server',
   'edit_server',
   'delete_server',
+  'save_server_order',
 ])
 
 // ========== 需要通过 localStorage 的废键箱命令 ==========
@@ -416,11 +439,17 @@ const TRASH_COMMANDS = new Set([
 // ========== 主入口 ==========
 
 export async function browserExecute(command: string, args: any): Promise<any> {
+  console.log(`[browserExecute] 收到命令: ${command}, args:`, args)
+  console.log(`[browserExecute] args?.req:`, args?.req)
+  console.log(`[browserExecute] args?.host:`, args?.host)
+  
   // args 格式为 { req: { host, port, password, db, ... } }，需要解包
   const params = args?.req || args || {}
+  console.log(`[browserExecute] 解包后的 params:`, params)
   
   // Redis 操作 → WebSocket 代理
   if (PROXY_COMMANDS.has(command)) {
+    console.log(`[browserExecute] 转发命令 ${command} 到 WebSocket 代理`)
     // generate_test_data 有额外参数 count（与 req 同级）
     if (command === 'generate_test_data') {
       const count = args?.count || 100
@@ -444,5 +473,6 @@ export async function browserExecute(command: string, args: any): Promise<any> {
     throw new Error(`${command} 在浏览器环境下由前端直接处理`)
   }
 
+  console.error(`[browserExecute] 浏览器环境不支持命令: ${command}`)
   throw new Error(`浏览器环境不支持命令: ${command}`)
 }

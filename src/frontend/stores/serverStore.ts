@@ -102,6 +102,18 @@ export const serverStore = defineStore('server', {
         console.error('测试连接失败:', error)
         throw error
       }
+    },
+    
+    async saveServerOrder(servers: Server[]): Promise<Server[]> {
+      try {
+        this.servers = await safeInvoke<Server[]>('save_server_order', {
+          servers
+        })
+        return this.servers
+      } catch (error) {
+        console.error('保存服务器顺序失败:', error)
+        throw error
+      }
     }
   }
 })

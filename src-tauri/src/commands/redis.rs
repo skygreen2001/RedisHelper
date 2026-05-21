@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::redis::connection::{RedisConnection, SlowlogRaw, KeyMemoryItem, KeyTypeStat, MemoryInfo};
+use crate::redis::connection::{RedisConnection, SlowlogRaw, KeyMemoryItem, KeyTypeStat, MemoryInfo, KeyStatItem, KeysResponse};
+use crate::storage::config::debug_println;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConnectRequest {
@@ -8,6 +9,8 @@ pub struct ConnectRequest {
     pub port: u16,
     pub password: Option<String>,
     pub db: u8,
+    #[serde(default)]
+    pub limit: Option<usize>, // 可选的键数量限制，用于分页加载
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,34 +51,79 @@ pub struct KeyValueResponse {
 
 #[tauri::command]
 pub fn connect(req: ConnectRequest) -> Result<bool, String> {
-    match RedisConnection::new(&req.host, req.port, req.password) {
+    let t0 = std::time::Instant::now();
+    debug_println!("[DEBUG] connect: 建立连接 {}:{}", req.host, req.port);
+    // 使用连接池复用连接
+    match RedisConnection::from_cache(&req.host, req.port, req.password.as_deref(), req.db) {
         Ok(mut conn) => {
-            conn.select(req.db).map_err(|e| e.to_string())?;
+            let t1 = std::time::Instant::now();
+            debug_println!("[DEBUG] connect: 获取/创建连接成功，耗时 {:?}", t1 - t0);
             conn.ping().map_err(|e| e.to_string())?;
+            let t2 = std::time::Instant::now();
+            debug_println!("[DEBUG] connect: PING 成功，耗时 {:?}", t2 - t1);
+            debug_println!("[DEBUG] connect: 总耗时 {:?}", t2 - t0);
             Ok(true)
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => {
+            let t_err = std::time::Instant::now();
+            debug_println!("[DEBUG] connect: 连接失败，耗时 {:?}, error: {}", t_err - t0, e);
+            Err(e.to_string())
+        }
     }
 }
 
 #[tauri::command]
 pub fn get_databases(req: ConnectRequest) -> Result<Vec<(u8, usize)>, String> {
-    match RedisConnection::new(&req.host, req.port, req.password) {
+    let t0 = std::time::Instant::now();
+    debug_println!("[DEBUG] get_databases: 开始获取数据库列表 {}:{}", req.host, req.port);
+    // 使用连接池复用连接
+    match RedisConnection::from_cache(&req.host, req.port, req.password.as_deref(), 0) {
         Ok(mut conn) => {
-            conn.get_databases().map_err(|e| e.to_string())
+            let t1 = std::time::Instant::now();
+            debug_println!("[DEBUG] get_databases: 获取/创建连接成功，耗时 {:?}", t1 - t0);
+            let result = conn.get_databases();
+            let t2 = std::time::Instant::now();
+            debug_println!("[DEBUG] get_databases: INFO keyspace 成功，耗时 {:?}", t2 - t1);
+            debug_println!("[DEBUG] get_databases: 总耗时 {:?}", t2 - t0);
+            result.map_err(|e| e.to_string())
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => {
+            let t_err = std::time::Instant::now();
+            debug_println!("[DEBUG] get_databases: 连接失败，耗时 {:?}, error: {}", t_err - t0, e);
+            Err(e.to_string())
+        }
     }
 }
 
 #[tauri::command]
-pub fn get_keys(req: ConnectRequest) -> Result<Vec<String>, String> {
-    match RedisConnection::new(&req.host, req.port, req.password) {
+pub fn get_keys(req: ConnectRequest) -> Result<KeysResponse, String> {
+    let t0 = std::time::Instant::now();
+    let limit_str = req.limit.map(|l| l.to_string()).unwrap_or_else(|| "无限制".to_string());
+    debug_println!("[DEBUG] get_keys: 开始获取键列表 {}:{}/{} (限制: {})", req.host, req.port, req.db, limit_str);
+    // 使用连接池复用连接
+    match RedisConnection::from_cache(&req.host, req.port, req.password.as_deref(), req.db) {
         Ok(mut conn) => {
-            conn.select(req.db).map_err(|e| e.to_string())?;
-            conn.get_keys().map_err(|e| e.to_string())
+            let t1 = std::time::Instant::now();
+            debug_println!("[DEBUG] get_keys: 获取/创建连接成功，耗时 {:?}", t1 - t0);
+            let result = conn.get_keys(req.limit);
+            let t2 = std::time::Instant::now();
+            match &result {
+                Ok(resp) => {
+                    debug_println!("[DEBUG] get_keys: SCAN 成功，获取 {} 个键（总计 {} 个），耗时 {:?}", 
+                        resp.keys.len(), resp.total, t2 - t1);
+                }
+                Err(e) => {
+                    debug_println!("[DEBUG] get_keys: SCAN 失败，耗时 {:?}, error: {}", t2 - t1, e);
+                }
+            }
+            debug_println!("[DEBUG] get_keys: 总耗时 {:?}", t2 - t0);
+            result.map_err(|e| e.to_string())
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => {
+            let t_err = std::time::Instant::now();
+            debug_println!("[DEBUG] get_keys: 连接失败，耗时 {:?}, error: {}", t_err - t0, e);
+            Err(e.to_string())
+        }
     }
 }
 
@@ -336,6 +384,29 @@ pub fn get_memory_info(req: ConnectRequest) -> Result<MemoryInfoResponse, String
             response.key_type_stats = key_type_stats;
             
             Ok(response)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// 获取完整的服务器信息
+#[tauri::command]
+pub fn get_server_info(req: ConnectRequest) -> Result<std::collections::HashMap<String, String>, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.get_server_info().map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// 获取键值统计
+#[tauri::command]
+pub fn get_key_stats(req: ConnectRequest) -> Result<Vec<KeyStatItem>, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.get_key_stats().map_err(|e| e.to_string())
         }
         Err(e) => Err(e.to_string()),
     }

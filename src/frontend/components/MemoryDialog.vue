@@ -309,11 +309,6 @@ function calculatePageTotalSize(): number {
   return paginatedKeyList.value.reduce((sum, item) => sum + item.size, 0)
 }
 
-function calculateListTotalSize(): string {
-  const total = memoryInfo.value.key_memory_list.reduce((sum, item) => sum + item.size, 0)
-  return formatBytes(total)
-}
-
 async function handleRefresh() {
   loading.value = true
   try {

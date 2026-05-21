@@ -30,7 +30,33 @@
     <div v-if="servers.length === 0" class="empty-state">
       <el-empty description="暂无服务器配置" />
     </div>
-    <el-table v-else :data="servers" style="width: 100%" stripe>
+    <el-table
+      v-else
+      :data="servers"
+      style="width: 100%"
+      stripe
+      row-key="id"
+    >
+      <el-table-column label="排序" width="60" align="center">
+        <template #default="{ row }">
+          <div class="sort-buttons">
+            <span
+              class="sort-icon"
+              :class="{ disabled: getServerIndex(row.id) === 0 }"
+              @click="getServerIndex(row.id) > 0 && moveUp(row.id)"
+            >
+              ↑
+            </span>
+            <span
+              class="sort-icon"
+              :class="{ disabled: getServerIndex(row.id) === servers.length - 1 }"
+              @click="getServerIndex(row.id) < servers.length - 1 && moveDown(row.id)"
+            >
+              ↓
+            </span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="id" label="标识" width="120" />
       <el-table-column prop="name" label="名称" width="180" />
       <el-table-column prop="host" label="服务器" width="180" />
@@ -62,6 +88,22 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- 配置区域 -->
+    <div class="config-section">
+      <div class="config-item">
+        <div class="config-label">
+          <span class="config-title">调试日志</span>
+          <span class="config-description">开启后将在终端中显示详细的调试信息</span>
+        </div>
+        <el-switch
+          v-model="debugEnabled"
+          @change="handleDebugSwitchChange"
+          active-text="开启"
+          inactive-text="关闭"
+        />
+      </div>
+    </div>
 
     <!-- 添加服务器对话框 -->
     <el-dialog
@@ -177,14 +219,19 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Edit, Delete, Connection, Check, Close, Download, Upload } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Connection, Check, Close, Download, Upload, ChevronUp, ChevronDown } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
+import { configStore } from '../stores/configStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { isTauriEnv } from '../utils/tauri'
 import { sessionManager } from '../sessions/SessionManager'
 
 const server = serverStore()
+const config = configStore()
 const fileInput = ref<HTMLInputElement | null>(null)
+
+// 调试日志开关
+const debugEnabled = ref<boolean>(false)
 
 // 状态
 const showAddDialog = ref<boolean>(false)
@@ -467,9 +514,61 @@ const handleFileSelect = async (event: Event) => {
   }
 }
 
+// 处理调试日志开关变化
+const handleDebugSwitchChange = async (value: boolean) => {
+  await config.setDebugLogEnabled(value)
+  ElMessage.success(value ? '调试日志已开启' : '调试日志已关闭')
+}
+
+// 获取服务器索引
+const getServerIndex = (serverId: string): number => {
+  return server.servers.findIndex(s => s.id === serverId)
+}
+
+// 向上移动
+const moveUp = async (serverId: string) => {
+  const index = getServerIndex(serverId)
+  if (index <= 0) return
+
+  const newServers = [...server.servers]
+  const temp = newServers[index]
+  newServers[index] = newServers[index - 1]
+  newServers[index - 1] = temp
+
+  server.servers = newServers
+  await saveServerOrder()
+}
+
+// 向下移动
+const moveDown = async (serverId: string) => {
+  const index = getServerIndex(serverId)
+  if (index >= server.servers.length - 1) return
+
+  const newServers = [...server.servers]
+  const temp = newServers[index]
+  newServers[index] = newServers[index + 1]
+  newServers[index + 1] = temp
+
+  server.servers = newServers
+  await saveServerOrder()
+}
+
+// 保存服务器顺序
+const saveServerOrder = async () => {
+  try {
+    await server.saveServerOrder([...server.servers])
+    ElMessage.success('服务器顺序已保存')
+  } catch (error) {
+    console.error('保存服务器顺序失败:', error)
+    ElMessage.error('保存顺序失败')
+  }
+}
+
 // 生命周期
 onMounted(async () => {
   await server.loadServers()
+  await config.loadDebugConfig()
+  debugEnabled.value = config.debugLogEnabled
 })
 </script>
 
@@ -511,6 +610,38 @@ onMounted(async () => {
   font-size: 14px;
 }
 
+/* 配置区域 */
+.config-section {
+  background-color: #fafafa;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-top: 20px;
+}
+
+.config-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.config-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.config-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.config-description {
+  font-size: 13px;
+  color: #909399;
+}
+
 /* 空状态 */
 .empty-state {
   flex: 1;
@@ -532,6 +663,34 @@ onMounted(async () => {
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   max-height: 400px;
+}
+
+/* 排序按钮 */
+.sort-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+
+.sort-icon {
+  cursor: pointer;
+  color: #606266;
+  font-size: 20px;
+  font-weight: bold;
+  transition: all 0.2s;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.sort-icon:hover:not(.disabled) {
+  color: #409eff;
+  background-color: #ecf5ff;
+}
+
+.sort-icon.disabled {
+  cursor: not-allowed;
+  color: #d9d9d9;
 }
 
 .el-table :deep(.el-table__header-wrapper) {

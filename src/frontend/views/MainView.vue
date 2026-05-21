@@ -1,5 +1,24 @@
 <template>
   <div class="main-container">
+    <!-- 全局加载遮罩（覆盖整个APP） -->
+    <Transition name="fade">
+      <div v-if="isGlobalLoading" class="global-loading-overlay-full">
+        <div class="loading-card">
+          <el-icon class="loading-spinner-large" :size="48"><Loading /></el-icon>
+          <div class="loading-title">{{ loadingMessage }}</div>
+          <div class="loading-tip">请稍候...</div>
+          <el-button 
+            type="danger" 
+            size="large" 
+            @click="cancelConnectionSwitch"
+            class="cancel-btn"
+          >
+            取消连接
+          </el-button>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 标签栏（最顶部） -->
     <TabBar @new-tab="handleNewTabFromTabBar" />
 
@@ -17,7 +36,7 @@
     <!-- 菜单栏 -->
     <div class="menu-bar">
       <div class="menu-left">
-        <el-dropdown @command="handleDeviceCommand">
+        <el-dropdown ref="serverDropdownRef" @command="handleDeviceCommand">
           <span class="el-dropdown-link">
             {{ selectedServer?.name || '连接' }} <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </span>
@@ -308,7 +327,7 @@
       </div>
 
       <!-- 右侧值展示区 -->
-      <div class="value-display">
+      <div class="value-display" style="position: relative;">
         <div v-if="selectedKey" class="key-detail">
           <div class="value-header">
             <div class="value-type">类型: {{ keyType.toUpperCase() }}</div>
@@ -337,8 +356,8 @@
             </el-button>
           </div>
         </div>
-        <div v-else class="empty-state">
-          <el-empty description="暂无数据" />
+        <div v-else class="home-view-wrapper">
+          <HomeView :server="selectedServer" :db="selectedDb" />
         </div>
       </div>
       </template>
@@ -647,12 +666,13 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown, Check, Document, DataAnalysis } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown, Check, Document, DataAnalysis, Loading } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
 import { trashStore } from '../stores/trashStore'
 import { ElMessageBox } from 'element-plus'
 import ServerConfigView from './ServerConfigView.vue'
+import HomeView from './HomeView.vue'
 import TabBar from '../components/TabBar.vue'
 import LogDialog from '../components/LogDialog.vue'
 import MemoryDialog from '../components/MemoryDialog.vue'
@@ -664,6 +684,7 @@ const logStore = useLogStore()
 const showLogDialog = ref(false)
 const showMemoryDialog = ref(false)
 const memoryDialogRef = ref<InstanceType<typeof MemoryDialog> | null>(null)
+const serverDropdownRef = ref<any>(null)
 
 // 简化的 Tauri 环境检测
 function checkIsTauri(): boolean {
@@ -700,6 +721,11 @@ const trash = trashStore()
 
 // 状态
 const showSelectServerDialog = ref(false)
+const isGlobalLoading = ref(false)
+const loadingMessage = ref('正在加载...')
+// 保存切换前的连接信息（用于取消）
+const previousServer = ref<any>(null)
+const previousDb = ref<number | null>(null)
 const selectedServer = computed(() => sessionManager.active?.selectedServer ?? null)
 const selectedDb = computed(() => sessionManager.active?.selectedDb)
 const databases = computed(() => sessionManager.active?.databases || [])
@@ -823,14 +849,98 @@ const toggleDbSelection = (db: number) => {
 }
 
 // 处理连接下拉菜单命令
-const handleDeviceCommand = (command: any) => {
+const handleDeviceCommand = async (command: any) => {
+  // 立即关闭下拉菜单
+  if (serverDropdownRef.value?.hide) {
+    serverDropdownRef.value.hide()
+  }
+  
   if (command === 'settings') {
     // 显示服务器配置页面
     sessionManager.active.showServerConfig = true
   } else if (command.type === 'select') {
-    sessionManager.active.selectedServer = command.server
-    handleServerChange()
+    // 【第一时间】显示加载遮罩（使用 requestAnimationFrame 确保立即显示）
+    isGlobalLoading.value = true
+    loadingMessage.value = `正在连接 ${command.server.name}...`
+    
+    // 保存切换前的连接信息（用于取消）
+    previousServer.value = sessionManager.active.selectedServer
+    previousDb.value = sessionManager.active.selectedDb
+    
+    console.log(`[DEBUG] 点击连接 ${command.server.name} (${command.server.host})`)
+    const t0 = performance.now()
+    
+    // 使用 requestAnimationFrame 在下一帧执行耗时操作
+    // 这样可以确保加载组件立即显示出来，不被阻塞
+    requestAnimationFrame(() => {
+      console.log(`[DEBUG] requestAnimationFrame 回调，UI 已更新，耗时 ${performance.now() - t0}ms`)
+      const t1 = performance.now()
+      // 清空当前数据
+      resetSessionData()
+      // 设置新服务器
+      sessionManager.active.selectedServer = command.server
+      // 开始加载数据
+      handleServerChange().then(() => {
+        console.log(`[DEBUG] handleServerChange 完成，总耗时 ${performance.now() - t1}ms`)
+      })
+    })
   }
+}
+
+// 取消连接切换，返回原来的连接
+const cancelConnectionSwitch = () => {
+  // 如果有原连接，恢复原来的连接
+  if (previousServer.value) {
+    // 显示加载状态
+    isGlobalLoading.value = true
+    loadingMessage.value = `正在恢复 ${previousServer.value.name}...`
+    
+    // 恢复连接
+    sessionManager.active.selectedServer = previousServer.value
+    sessionManager.active.selectedDb = previousDb.value
+    
+    // 清空并重新加载
+    requestAnimationFrame(async () => {
+      await handleServerChange()
+      sessionManager.active.messageType = 'success'
+      sessionManager.active.message = '已取消切换连接'
+    })
+  } else {
+    // 没有原连接，直接隐藏遮罩
+    isGlobalLoading.value = false
+  }
+  
+  // 清空保存的原连接信息
+  previousServer.value = null
+  previousDb.value = null
+}
+
+// 重置会话数据（切换服务器时调用）
+const resetSessionData = () => {
+  const session = sessionManager.active
+  // 清空数据库列表
+  session.databases = []
+  // 清空键列表
+  session.keys = []
+  session.keysCursor = 0
+  session.keysTotal = 0
+  // 清空选中的键
+  session.selectedKey = ''
+  session.keyValue = ''
+  session.keyType = ''
+  // 重置搜索
+  session.searchPattern = ''
+  // 清空访问记录
+  session.visitedDbs.clear()
+  session.newlyCreatedDbs.clear()
+  // 退出多选模式
+  if (session.isMultiSelectMode) {
+    session.clearSelection()
+  }
+  // 退出废键箱视图
+  session.isTrashView = false
+  // 更新标题
+  session.updateTitle()
 }
 
 // 从标签栏新建标签页
@@ -1129,16 +1239,27 @@ const keyTree = computed(() => {
 // 方法
 const handleServerChange = async () => {
   const session = sessionManager.active
+  if (!session.selectedServer) {
+    // 如果没有选中服务器，隐藏加载遮罩
+    isGlobalLoading.value = false
+    return
+  }
+  
   // 切换服务器时退出多选模式
   if (session.isMultiSelectMode) {
     session.clearSelection()
   }
-  if (session.selectedServer) {
-    // 重置 selectedDb 为 null，让 loadDatabases 默认选择 DB0
-    session.selectedDb = null
-    session.updateTitle()
-    await loadDatabases()
-  }
+  
+  // 重置 selectedDb 为 null
+  session.selectedDb = null
+  // 立即更新标题（显示新服务器名称）
+  session.updateTitle()
+  
+  // 直接加载数据库列表（无需 nextTick，因为已通过 requestAnimationFrame 确保 UI 更新）
+  await loadDatabases()
+  
+  // 数据加载完成，隐藏加载遮罩
+  isGlobalLoading.value = false
 }
 
 const handleDbChange = async () => {
@@ -1188,11 +1309,13 @@ const loadDatabases = async () => {
     
     sessionManager.active.databases = mergedDbs
     
+    // 连接成功后自动选择第一个数据库，加载前100个键（分页显示）
     if (mergedDbs.length > 0 && sessionManager.active.selectedDb == null) {
       const firstDb = mergedDbs[0][0]
       sessionManager.active.selectedDb = firstDb
       sessionManager.active.visitedDbs.add(firstDb)
-      await loadKeys()
+      // 加载前100个键（默认分页大小）
+      await loadKeys(true)
     }
     
     // 更新标签标题（显示服务器名称和当前DB）
@@ -1216,25 +1339,36 @@ const loadKeys = async (reset: boolean = true) => {
       sessionManager.active.keysCursor = 0
     }
 
-    // 模拟分页加载 - 每次加载100个
+    // 分页加载 - 每次加载100个
     const pageSize = 100
 
-    // 模拟从后端获取当前批次的 keys
-    // 实际使用时，这里会调用后端分页 API
-    const allKeys = await redis.getKeys({
+    // 首次加载时限制为100个，后续加载获取全部
+    const keysResponse = await redis.getKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
       password: selectedServer.value.password,
-      db: selectedDb.value ?? 0
+      db: selectedDb.value ?? 0,
+      ...(reset ? { limit: pageSize } : {}) // 首次加载限制100个
     })
 
-    // 设置总数
-    sessionManager.active.keysTotal = allKeys.length
+    const allKeys = keysResponse.keys
+    const dbTotal = keysResponse.total
+
+    // 检查 allKeys 是否为数组
+    if (!Array.isArray(allKeys)) {
+      console.error('加载键失败: keys 不是数组', allKeys)
+      sessionManager.active.messageType = 'error'
+      sessionManager.active.message = '加载键失败: 数据格式错误'
+      return
+    }
+
+    // 设置总数（使用后端返回的真实总数）
+    sessionManager.active.keysTotal = dbTotal
 
     // 如果是首次加载，只取前100个
     if (reset) {
       sessionManager.active.keys = allKeys.slice(0, pageSize)
-      if (allKeys.length > pageSize) {
+      if (allKeys.length >= pageSize) {
         sessionManager.active.keysCursor = pageSize // 标记还有更多
       } else {
         sessionManager.active.keysCursor = 0 // 没有更多了
@@ -1265,17 +1399,31 @@ const handleLoadMore = async () => {
     const pageSize = 100
 
     // 获取所有 keys（实际应该用分页 API）
-    const allKeys = await redis.getKeys({
+    const keysResponse = await redis.getKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0
     })
 
+    const allKeys = keysResponse.keys
+    const dbTotal = keysResponse.total
+
+    // 检查 allKeys 是否为数组
+    if (!Array.isArray(allKeys)) {
+      console.error('加载键失败: keys 不是数组', allKeys)
+      sessionManager.active.messageType = 'error'
+      sessionManager.active.message = '加载键失败: 数据格式错误'
+      return
+    }
+
     // 获取当前已加载的数量
     const currentLength = keys.value.length
     // 计算剩余数量
     const remaining = allKeys.length - currentLength
+
+    // 更新总数
+    sessionManager.active.keysTotal = dbTotal
 
     if (remaining > 0) {
       // 加载下一批（最多 pageSize 个）
@@ -1326,16 +1474,25 @@ const handleLoadAll = async () => {
   sessionManager.active.isLoadingAll = true
   try {
     // 先获取所有 keys 用于计算总数
-    const allKeys = await redis.getKeys({
+    const keysResponse = await redis.getKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0
     })
 
-    sessionManager.active.keysTotal = allKeys.length
-    const total = allKeys.length
+    const allKeys = keysResponse.keys
+    const total = keysResponse.total
+    sessionManager.active.keysTotal = total
     const batchSize = 100 // 每批加载 100 个
+
+    // 检查 allKeys 是否为数组
+    if (!Array.isArray(allKeys)) {
+      console.error('加载键失败: keys 不是数组', allKeys)
+      sessionManager.active.messageType = 'error'
+      sessionManager.active.message = '加载键失败: 数据格式错误'
+      return
+    }
 
     // 如果总数较少，直接显示
     if (total <= batchSize) {
@@ -1708,7 +1865,7 @@ const handleExport = async () => {
       sessionManager.active.message = `导出成功: ${filePath}`
     } else {
       // 浏览器环境：获取数据后下载为文件
-      const keys = await redis.getKeys({
+      const keysResponse = await redis.getKeys({
         host: selectedServer.value.host,
         port: selectedServer.value.port,
         password: selectedServer.value.password,
@@ -1716,7 +1873,7 @@ const handleExport = async () => {
       })
       
       const data = []
-      for (const key of keys) {
+      for (const key of keysResponse.keys) {
         try {
           const result = await redis.getKeyValue({
             host: selectedServer.value.host,
@@ -2879,8 +3036,14 @@ const currentServerTrashCount = computed(() => {
   display: flex;
   flex-direction: column;
   padding: 20px;
-  overflow: hidden;
+  min-height: 0;
   background-color: #ffffff;
+}
+
+.home-view-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .key-detail {
@@ -3336,5 +3499,137 @@ const currentServerTrashCount = computed(() => {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* 全局加载遮罩样式 */
+.global-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.95);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.loading-spinner {
+  animation: rotate 1s linear infinite;
+  color: #409eff;
+}
+
+.loading-text {
+  font-size: 14px;
+  color: #606266;
+  font-weight: 500;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ========== 全局加载遮罩样式（覆盖整个APP） ========== */
+.global-loading-overlay-full {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.loading-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 20px;
+  padding: 48px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  max-width: 400px;
+  min-width: 300px;
+}
+
+.loading-spinner-large {
+  animation: rotate 1s linear infinite;
+  color: #ffffff;
+  font-size: 48px;
+}
+
+.loading-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #ffffff;
+  text-align: center;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.loading-tip {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.8);
+  text-align: center;
+  margin: 0;
+}
+
+.cancel-btn {
+  margin-top: 12px;
+  padding: 12px 32px;
+  font-size: 16px;
+  font-weight: 500;
+  border-radius: 25px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.cancel-btn:active {
+  transform: translateY(0);
+}
+
+/* ========== Transition 动画样式 ========== */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.fade-enter-to,
+.fade-leave-from {
+  opacity: 1;
 }
 </style>

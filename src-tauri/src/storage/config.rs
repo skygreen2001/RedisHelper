@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerConfig {
@@ -20,7 +22,42 @@ pub struct ServerConfig {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     pub servers: Vec<ServerConfig>,
+    #[serde(default = "default_debug_log_enabled")]
+    pub debug_log_enabled: bool,
 }
+
+fn default_debug_log_enabled() -> bool {
+    false
+}
+
+/// 全局配置管理器缓存
+pub static GLOBAL_CONFIG_MANAGER: OnceLock<Mutex<ConfigManager>> = OnceLock::new();
+
+/// 获取全局配置管理器
+pub fn get_global_config_manager() -> &'static Mutex<ConfigManager> {
+    GLOBAL_CONFIG_MANAGER.get_or_init(|| {
+        let manager = ConfigManager::new().expect("Failed to initialize config manager");
+        Mutex::new(manager)
+    })
+}
+
+/// 检查 debug 日志是否启用
+pub fn is_debug_log_enabled() -> bool {
+    let manager = get_global_config_manager().lock().unwrap();
+    manager.get_debug_log_enabled()
+}
+
+/// Debug 日志打印宏
+#[macro_export]
+macro_rules! debug_println {
+    ($($arg:tt)*) => {
+        if $crate::storage::config::is_debug_log_enabled() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
+pub use crate::debug_println;
 
 pub struct ConfigManager {
     config: Config,
@@ -60,7 +97,10 @@ impl ConfigManager {
             Ok(config)
         } else {
             // 返回默认配置
-            Ok(Config { servers: Vec::new() })
+            Ok(Config { 
+                servers: Vec::new(),
+                debug_log_enabled: false,
+            })
         }
     }
     
@@ -115,5 +155,17 @@ impl ConfigManager {
     
     pub fn get_servers(&self) -> Vec<ServerConfig> {
         self.config.servers.clone()
+    }
+    
+    pub fn set_servers(&mut self, servers: Vec<ServerConfig>) {
+        self.config.servers = servers;
+    }
+    
+    pub fn get_debug_log_enabled(&self) -> bool {
+        self.config.debug_log_enabled
+    }
+    
+    pub fn set_debug_log_enabled(&mut self, enabled: bool) {
+        self.config.debug_log_enabled = enabled;
     }
 }
