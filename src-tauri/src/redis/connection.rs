@@ -563,11 +563,12 @@ impl RedisConnection {
         let mut key_memory_list = Vec::new();
         let mut type_stats: std::collections::HashMap<String, (usize, u64)> = std::collections::HashMap::new();
         let mut total_keys = 0;
+        let mut cursor = 0;  // 初始 cursor 为 0
         
         // 逐批获取键，避免长时间锁定
         loop {
             let batch_keys: Vec<String>;
-            let cursor: u64;
+            let new_cursor: u64;  // 新的 cursor
             
             {
                 let mut cache = get_cache().lock().unwrap();
@@ -576,11 +577,11 @@ impl RedisConnection {
                         std::io::ErrorKind::NotConnected, "连接不存在")))?;
                 
                 let result: (u64, Vec<String>) = redis::cmd("SCAN")
-                    .arg(0)  // 每次都从0开始扫描
+                    .arg(cursor)  // 使用上一次的 cursor
                     .arg("COUNT")
                     .arg(100)
                     .query(conn)?;
-                cursor = result.0;
+                new_cursor = result.0;
                 batch_keys = result.1;
             }
             
@@ -617,6 +618,8 @@ impl RedisConnection {
                 entry.0 += 1;
                 entry.1 += size;
             }
+            
+            cursor = new_cursor;  // 更新 cursor
             
             if cursor == 0 {
                 break;
