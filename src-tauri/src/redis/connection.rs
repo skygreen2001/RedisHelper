@@ -588,7 +588,7 @@ impl RedisConnection {
         let mut next_cursor: u64 = 0;
         
         if total_keys == 0 {
-            return Ok((key_memory_list, Vec::new(), 0, 0));
+            return Ok((key_memory_list, Vec::new(), 0, next_cursor));
         }
         
         // SCAN 一批 key（最多 SCAN_BATCH_SIZE 个）

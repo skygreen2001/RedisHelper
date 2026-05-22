@@ -154,10 +154,10 @@
     </div>
 
     <!-- 键列表和值展示 -->
-    <div class="content-area">
+    <div class="content-area" ref="contentAreaRef">
       <template v-if="!isTrashView">
       <!-- 左侧键列表区 -->
-      <div class="key-list">
+      <div class="key-list" :style="{ width: keyListWidth + 'px' }">
         <!-- 搜索和操作栏 -->
         <div class="search-and-actions">
           <!-- 搜索模式 -->
@@ -324,6 +324,15 @@
             </span>
           </div>
         </div>
+      </div>
+
+      <!-- 可拖拽分隔条 -->
+      <div 
+        class="resize-divider"
+        @mousedown="startResize"
+        :class="{ 'resizing': isResizing }"
+      >
+        <div class="resize-handle"></div>
       </div>
 
       <!-- 右侧值展示区 -->
@@ -718,6 +727,54 @@ if (!isRunningInTauri.value) {
 const server = serverStore()
 const redis = redisStore()
 const trash = trashStore()
+
+// ========== 分隔条拖拽相关 ==========
+const contentAreaRef = ref<HTMLElement | null>(null)
+const KEY_LIST_WIDTH_KEY = 'redis-helper-key-list-width'
+const MIN_KEY_LIST_WIDTH = 200
+const MAX_KEY_LIST_WIDTH_RATIO = 0.8
+
+const keyListWidth = ref(400)
+const isResizing = ref(false)
+
+const startResize = (e: MouseEvent) => {
+  e.preventDefault()
+  isResizing.value = true
+  
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!contentAreaRef.value) return
+    
+    const containerRect = contentAreaRef.value.getBoundingClientRect()
+    const containerWidth = containerRect.width
+    const maxWidth = containerWidth * MAX_KEY_LIST_WIDTH_RATIO
+    
+    let newWidth = e.clientX - containerRect.left
+    newWidth = Math.max(MIN_KEY_LIST_WIDTH, Math.min(newWidth, maxWidth))
+    
+    keyListWidth.value = Math.round(newWidth)
+  }
+  
+  const handleMouseUp = () => {
+    isResizing.value = false
+    localStorage.setItem(KEY_LIST_WIDTH_KEY, String(keyListWidth.value))
+    document.removeEventListener('mousemove', handleMouseMove)
+    document.removeEventListener('mouseup', handleMouseUp)
+  }
+  
+  document.addEventListener('mousemove', handleMouseMove)
+  document.addEventListener('mouseup', handleMouseUp)
+}
+
+const loadKeyListWidth = () => {
+  const savedWidth = localStorage.getItem(KEY_LIST_WIDTH_KEY)
+  if (savedWidth) {
+    const width = parseInt(savedWidth, 10)
+    if (!isNaN(width) && width >= MIN_KEY_LIST_WIDTH) {
+      keyListWidth.value = width
+    }
+  }
+}
+// ====================================
 
 // 状态
 const showSelectServerDialog = ref(false)
@@ -1915,6 +1972,10 @@ onMounted(async () => {
   try {
     sessionManager.init()
     sessionManager.active.message = ''
+    
+    // 加载保存的分隔条宽度
+    loadKeyListWidth()
+    
     // 导入文件选择
     fileInput.value = document.createElement('input')
     fileInput.value.type = 'file'
@@ -2821,12 +2882,48 @@ const currentServerTrashCount = computed(() => {
 
 /* 左侧键列表区 */
 .key-list {
-  width: 35%;
-  border-right: 1px solid #e4e7ed;
+  flex-shrink: 0;
+  border-right: none;
   display: flex;
   flex-direction: column;
   background-color: #ffffff;
   overflow: hidden;
+}
+
+/* 可拖拽分隔条 */
+.resize-divider {
+  width: 6px;
+  background-color: #f0f0f0;
+  cursor: col-resize;
+  position: relative;
+  flex-shrink: 0;
+  transition: background-color 0.2s;
+  user-select: none;
+}
+
+.resize-divider:hover {
+  background-color: #1890ff;
+}
+
+.resize-divider.resizing {
+  background-color: #1890ff;
+}
+
+.resize-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 30px;
+  background-color: #c0c4cc;
+  border-radius: 1px;
+  transition: background-color 0.2s;
+}
+
+.resize-divider:hover .resize-handle,
+.resize-divider.resizing .resize-handle {
+  background-color: #ffffff;
 }
 
 /* 搜索和操作栏 */
