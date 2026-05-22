@@ -339,6 +339,7 @@ pub struct MemoryInfoResponse {
     pub large_keys_count: usize,
     pub key_memory_list: Vec<KeyMemoryItem>,
     pub key_type_stats: Vec<KeyTypeStat>,
+    pub next_cursor: u64,
 }
 
 impl From<MemoryInfo> for MemoryInfoResponse {
@@ -355,20 +356,21 @@ impl From<MemoryInfo> for MemoryInfoResponse {
             large_keys_count: 0,
             key_memory_list: vec![],
             key_type_stats: vec![],
+            next_cursor: 0,
         }
     }
 }
 
 #[tauri::command]
-pub fn get_memory_info(req: ConnectRequest) -> Result<MemoryInfoResponse, String> {
+pub fn get_memory_info(req: ConnectRequest, cursor: Option<u64>) -> Result<MemoryInfoResponse, String> {
     match RedisConnection::new(&req.host, req.port, req.password) {
         Ok(mut conn) => {
             conn.select(req.db).map_err(|e| e.to_string())?;
             
             let memory_info = conn.get_memory_info().map_err(|e| e.to_string())?;
             
-            let (key_memory_list, key_type_stats, keys_count) = 
-                conn.scan_keys_memory().map_err(|e| e.to_string())?;
+            let (key_memory_list, key_type_stats, keys_count, next_cursor) = 
+                conn.scan_keys_memory(cursor.unwrap_or(0)).map_err(|e| e.to_string())?;
             
             let expired_keys_ratio = if keys_count > 0 {
                 (key_memory_list.iter().filter(|item| item.size > 0).count() as f64 / keys_count as f64) * 100.0
@@ -382,8 +384,46 @@ pub fn get_memory_info(req: ConnectRequest) -> Result<MemoryInfoResponse, String
             response.large_keys_count = key_memory_list.len();
             response.key_memory_list = key_memory_list;
             response.key_type_stats = key_type_stats;
+            response.next_cursor = next_cursor;
             
             Ok(response)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// 全量扫描键类型分布（独立接口，前端异步调用）
+/// 只查 TYPE 不查 MEMORY USAGE，速度比全量内存扫描快 ~100 倍
+#[tauri::command]
+pub fn get_type_distribution(req: ConnectRequest) -> Result<Vec<KeyTypeStat>, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            
+            let total_keys: usize = conn.dbsize().map_err(|e| e.to_string())?;
+            let type_counts = conn.scan_all_types().map_err(|e| e.to_string())?;
+            
+            let scanned: usize = type_counts.values().sum();
+            let key_type_stats: Vec<KeyTypeStat> = type_counts
+                .into_iter()
+                .map(|(key_type, count)| {
+                    // 类型分布用 key 数量比例，不用内存（没查 MEMORY USAGE）
+                    let memory_percent = if scanned > 0 {
+                        count as f64 / scanned as f64 * 100.0
+                    } else {
+                        0.0
+                    };
+                    KeyTypeStat {
+                        key_type,
+                        count,
+                        memory_bytes: 0, // 全量 TYPE 扫描不查内存，此字段为 0
+                        memory_percent,
+                    }
+                })
+                .collect();
+            
+            let _ = total_keys; // suppress unused warning
+            Ok(key_type_stats)
         }
         Err(e) => Err(e.to_string()),
     }

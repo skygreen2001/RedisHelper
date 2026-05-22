@@ -178,6 +178,7 @@ fn main() {
             commands::redis::generate_test_data,
             commands::redis::slowlog_get,
             commands::redis::get_memory_info,
+            commands::redis::get_type_distribution,
             commands::redis::get_server_info,
             commands::redis::get_key_stats,
             commands::export::export_data,

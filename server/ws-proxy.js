@@ -443,7 +443,8 @@ const handlers = {
   },
 
   // 获取内存分析信息
-  async get_memory_info({ host, port, password, db }) {
+  // 支持 cursor 参数：首次请求不传 cursor（全量分析），后续翻页传 cursor 继续扫描
+  async get_memory_info({ host, port, password, db, cursor }) {
     return executeRedisCommand(host, port, password, db, async (conn) => {
       console.log(`[ws-proxy][memory] 开始分析 ${host}:${port} db=${db} 的内存...`)
 
@@ -482,29 +483,38 @@ const handlers = {
         }
       }
 
-      // 扫描所有键的内存信息
+      // 使用 DBSIZE 获取 key 总数（O(1)，瞬间返回）
+      const totalKeys = await conn.dbsize()
+      console.log(`[ws-proxy][memory] DBSIZE 返回: ${totalKeys}`)
+
+      // 分页扫描：支持 cursor 参数继续扫描下一批
+      const SCAN_BATCH_SIZE = 100
       const keyMemoryList = []
       const typeStats = {}
-      let cursor = '0'
-      let totalKeys = 0
+      let nextCursor = '0'  // 返回给前端的下一页 cursor
 
-      do {
-        const [newCursor, keys] = await conn.scan(cursor, 'COUNT', 100)
-        cursor = newCursor
-        totalKeys += keys.length
+      if (totalKeys > 0) {
+        // cursor 参数：前端翻页时传入上次返回的 nextCursor 继续扫描
+        const scanCursor = cursor || '0'
+        const [newCursor, keys] = await conn.scan(scanCursor, 'COUNT', SCAN_BATCH_SIZE)
+        nextCursor = newCursor
+        console.log(`[ws-proxy][memory] SCAN cursor=${scanCursor} 返回 ${keys.length} 个 key，nextCursor=${nextCursor}`)
 
-        for (const key of keys) {
-          try {
-            const keyType = await conn.type(key)
-            let size = 0
+        if (keys.length > 0) {
+          // 合并 Pipeline：TYPE 和 MEMORY USAGE 交错发送，1 次 RTT，无并发竞争
+          // 格式：TYPE(k0), MEMORY(k0), TYPE(k1), MEMORY(k1), ...
+          const pipe = conn.pipeline()
+          for (const key of keys) {
+            pipe.type(key)
+            pipe.memory('USAGE', key)
+          }
+          const rawResults = await pipe.exec()
 
-            // 获取键的内存占用
-            try {
-              size = await conn.memory('USAGE', key) || 0
-            } catch {
-              // 某些键可能无法获取内存信息
-              size = 0
-            }
+          // 解析交错结果：偶数索引 = [err, type], 奇数索引 = [err, size]
+          for (let i = 0; i < keys.length; i++) {
+            const key = keys[i]
+            const keyType = rawResults[i * 2]?.[1] || 'none'
+            const size = rawResults[i * 2 + 1]?.[1] || 0
 
             keyMemoryList.push({
               key,
@@ -519,20 +529,17 @@ const handlers = {
             }
             typeStats[keyType].count++
             typeStats[keyType].memory_bytes += size
-          } catch (err) {
-            console.error(`[ws-proxy][memory] 处理键 ${key} 失败:`, err.message)
           }
         }
-      } while (cursor !== '0')
+      }
 
       // 按内存大小排序
       keyMemoryList.sort((a, b) => b.size - a.size)
 
-      // 不限制返回数量，让前端分页处理
-      const largeKeysCount = keyMemoryList.length
-      const limitedKeyMemoryList = keyMemoryList // 不截断
+      // 已扫描的 key 数量
+      const scannedKeysCount = keyMemoryList.length
 
-      // 计算类型统计
+      // 计算类型统计（基于本次扫描的样本）
       const totalMemory = Object.values(typeStats).reduce((sum, stat) => sum + stat.memory_bytes, 0)
       const keyTypeStats = Object.entries(typeStats).map(([keyType, stat]) => ({
         key_type: keyType,
@@ -553,13 +560,56 @@ const handlers = {
         maxmemory: maxmemory,
         keys_count: totalKeys,
         expired_keys_ratio: expiredKeysRatio,
-        large_keys_count: largeKeysCount,
-        key_memory_list: limitedKeyMemoryList,
-        key_type_stats: keyTypeStats
+        large_keys_count: scannedKeysCount,
+        key_memory_list: keyMemoryList,
+        key_type_stats: keyTypeStats,
+        next_cursor: nextCursor  // 返回给前端用于翻页
       }
 
-      console.log(`[ws-proxy][memory] 内存分析完成: ${totalKeys} 个键，${largeKeysCount} 个大键`)
+      console.log(`[ws-proxy][memory] 内存分析完成: 总计 ${totalKeys} 个键，本次扫描 ${scannedKeysCount} 个，nextCursor=${nextCursor}`)
       return result
+    })
+  },
+
+  // 全量扫描键类型分布（只查 TYPE 不查 MEMORY USAGE，速度快）
+  // 前端异步调用，不阻塞主界面加载
+  async get_type_distribution({ host, port, password, db }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      console.log(`[ws-proxy][type-dist] 开始全量 TYPE 扫描 ${host}:${port} db=${db}...`)
+      const BATCH_SIZE = 200
+      const typeCounts = {}
+      let cursor = '0'
+
+      do {
+        const [newCursor, keys] = await conn.scan(cursor, 'COUNT', BATCH_SIZE)
+        cursor = newCursor
+
+        if (keys.length > 0) {
+          // Pipeline 批量 TYPE，1 次 RTT 搞定一批
+          const pipe = conn.pipeline()
+          for (const key of keys) {
+            pipe.type(key)
+          }
+          const results = await pipe.exec()
+
+          for (const [err, keyType] of results) {
+            if (!err && keyType && keyType !== 'none') {
+              typeCounts[keyType] = (typeCounts[keyType] || 0) + 1
+            }
+          }
+        }
+      } while (cursor !== '0')
+
+      const total = Object.values(typeCounts).reduce((s, c) => s + c, 0)
+      const keyTypeStats = Object.entries(typeCounts).map(([keyType, count]) => ({
+        key_type: keyType,
+        count,
+        memory_bytes: 0,  // 全量 TYPE 扫描不查内存
+        memory_percent: total > 0 ? (count / total * 100) : 0
+      }))
+
+      console.log(`[ws-proxy][type-dist] 全量 TYPE 扫描完成: ${total} 个键，类型分布:`, typeCounts)
+      return keyTypeStats
     })
   },
 }

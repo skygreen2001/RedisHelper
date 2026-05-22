@@ -406,6 +406,17 @@ impl RedisConnection {
         Ok(entries)
     }
 
+    /// 获取当前 db 的键总数（O(1)）
+    pub fn dbsize(&mut self) -> Result<usize, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        let count: usize = redis::cmd("DBSIZE").query(conn)?;
+        Ok(count)
+    }
+
     /// 获取内存基本信息
     pub fn get_memory_info(&mut self) -> Result<MemoryInfo, Box<dyn Error>> {
         let cache_key = self.cache_key();
@@ -556,74 +567,88 @@ impl RedisConnection {
         }
     }
 
-    /// 扫描并获取所有键的内存信息
-    pub fn scan_keys_memory(&mut self) -> Result<(Vec<KeyMemoryItem>, Vec<KeyTypeStat>, usize), Box<dyn Error>> {
+    /// 扫描并获取键的内存信息（分页扫描，使用 DBSIZE 获取总数）
+    /// cursor: 0 = 首次扫描，其他值 = 继续上一次扫描
+    /// 返回: (key_memory_list, key_type_stats, total_keys, next_cursor)
+    pub fn scan_keys_memory(&mut self, cursor: u64) -> Result<(Vec<KeyMemoryItem>, Vec<KeyTypeStat>, usize, u64), Box<dyn Error>> {
         let cache_key = self.cache_key();
+        const SCAN_BATCH_SIZE: u64 = 100;
+        
+        // 使用 DBSIZE 获取总 key 数（O(1)，瞬间返回）
+        let total_keys: usize = {
+            let mut cache = get_cache().lock().unwrap();
+            let conn = cache.connections.get_mut(&cache_key)
+                .ok_or_else(|| Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected, "连接不存在")))?;
+            redis::cmd("DBSIZE").query(conn)?
+        };
         
         let mut key_memory_list = Vec::new();
         let mut type_stats: std::collections::HashMap<String, (usize, u64)> = std::collections::HashMap::new();
-        let mut total_keys = 0;
-        let mut cursor = 0;  // 初始 cursor 为 0
+        let mut next_cursor: u64 = 0;
         
-        // 逐批获取键，避免长时间锁定
-        loop {
-            let batch_keys: Vec<String>;
-            let new_cursor: u64;  // 新的 cursor
+        if total_keys == 0 {
+            return Ok((key_memory_list, Vec::new(), 0, 0));
+        }
+        
+        // SCAN 一批 key（最多 SCAN_BATCH_SIZE 个）
+        let batch_keys: Vec<String> = {
+            let mut cache = get_cache().lock().unwrap();
+            let conn = cache.connections.get_mut(&cache_key)
+                .ok_or_else(|| Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected, "连接不存在")))?;
             
-            {
-                let mut cache = get_cache().lock().unwrap();
-                let conn = cache.connections.get_mut(&cache_key)
-                    .ok_or_else(|| Box::new(std::io::Error::new(
-                        std::io::ErrorKind::NotConnected, "连接不存在")))?;
-                
-                let result: (u64, Vec<String>) = redis::cmd("SCAN")
-                    .arg(cursor)  // 使用上一次的 cursor
-                    .arg("COUNT")
-                    .arg(100)
-                    .query(conn)?;
-                new_cursor = result.0;
-                batch_keys = result.1;
+            let result: (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("COUNT")
+                .arg(SCAN_BATCH_SIZE)
+                .query(conn)?;
+            next_cursor = result.0;
+            result.1
+        };
+        
+        if batch_keys.is_empty() {
+            return Ok((key_memory_list, Vec::new(), total_keys, next_cursor));
+        }
+        
+        // 合并 Pipeline：TYPE 和 MEMORY USAGE 交错发送，只需 1 次 RTT
+        // 格式：TYPE(k0), MEMORY USAGE(k0), TYPE(k1), MEMORY USAGE(k1), ...
+        let raw_results: Vec<redis::Value> = {
+            let mut cache = get_cache().lock().unwrap();
+            let conn = cache.connections.get_mut(&cache_key)
+                .ok_or_else(|| Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected, "连接不存在")))?;
+            
+            let mut pipe = redis::pipe();
+            for key in &batch_keys {
+                pipe.cmd("TYPE").arg(key.as_str());
+                pipe.cmd("MEMORY").arg("USAGE").arg(key.as_str());
             }
+            pipe.query(conn)?
+        };
+        
+        // 解析交错结果：偶数索引 = TYPE (SimpleString), 奇数索引 = MEMORY USAGE (Int/Nil)
+        for (i, key) in batch_keys.iter().enumerate() {
+            let key_type = match raw_results.get(i * 2) {
+                Some(redis::Value::SimpleString(s)) => s.clone(),
+                Some(redis::Value::BulkString(s)) => String::from_utf8_lossy(s).to_string(),
+                _ => String::from("none"),
+            };
+            let size = match raw_results.get(i * 2 + 1) {
+                Some(redis::Value::Int(n)) => *n as u64,
+                _ => 0,
+            };
             
-            total_keys += batch_keys.len();
+            key_memory_list.push(KeyMemoryItem {
+                key: key.clone(),
+                size,
+                size_human: Self::format_bytes(size),
+                key_type: key_type.clone(),
+            });
             
-            for key in batch_keys {
-                let (key_type, size) = {
-                    let mut cache = get_cache().lock().unwrap();
-                    let conn = cache.connections.get_mut(&cache_key)
-                        .ok_or_else(|| Box::new(std::io::Error::new(
-                            std::io::ErrorKind::NotConnected, "连接不存在")))?;
-                    
-                    let key_type: String = redis::cmd("TYPE")
-                        .arg(&key)
-                        .query(conn)?;
-                    
-                    let size: Option<u64> = redis::cmd("MEMORY")
-                        .arg("USAGE")
-                        .arg(&key)
-                        .query(conn)
-                        .ok();
-                    
-                    (key_type, size.unwrap_or(0))
-                };
-                
-                key_memory_list.push(KeyMemoryItem {
-                    key: key.clone(),
-                    size,
-                    size_human: Self::format_bytes(size),
-                    key_type: key_type.clone(),
-                });
-                
-                let entry = type_stats.entry(key_type.clone()).or_insert((0, 0));
-                entry.0 += 1;
-                entry.1 += size;
-            }
-            
-            cursor = new_cursor;  // 更新 cursor
-            
-            if cursor == 0 {
-                break;
-            }
+            let entry = type_stats.entry(key_type.clone()).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += size;
         }
         
         key_memory_list.sort_by(|a, b| b.size.cmp(&a.size));
@@ -646,7 +671,68 @@ impl RedisConnection {
             })
             .collect();
         
-        Ok((key_memory_list, key_type_stats, total_keys))
+        Ok((key_memory_list, key_type_stats, total_keys, next_cursor))
+    }
+
+    /// 全量扫描所有键的 TYPE，用于准确的键类型分布统计
+    /// 只查 TYPE 不查 MEMORY USAGE，TYPE 是 O(1) 且 Pipeline 极快
+    /// 返回: HashMap<type_name, count>
+    pub fn scan_all_types(&mut self) -> Result<std::collections::HashMap<String, usize>, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        const BATCH_SIZE: u64 = 200; // TYPE 比 MEMORY USAGE 快，可以用更大批次
+        let mut type_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut cursor: u64 = 0;
+
+        loop {
+            // SCAN 一批 key
+            let batch_keys: Vec<String> = {
+                let mut cache = get_cache().lock().unwrap();
+                let conn = cache.connections.get_mut(&cache_key)
+                    .ok_or_else(|| Box::new(std::io::Error::new(
+                        std::io::ErrorKind::NotConnected, "连接不存在")))?;
+
+                let result: (u64, Vec<String>) = redis::cmd("SCAN")
+                    .arg(cursor)
+                    .arg("COUNT")
+                    .arg(BATCH_SIZE)
+                    .query(conn)?;
+                cursor = result.0;
+                result.1
+            };
+
+            if !batch_keys.is_empty() {
+                // Pipeline 批量 TYPE，1 次 RTT 搞定一批
+                let type_raw: Vec<redis::Value> = {
+                    let mut cache = get_cache().lock().unwrap();
+                    let conn = cache.connections.get_mut(&cache_key)
+                        .ok_or_else(|| Box::new(std::io::Error::new(
+                            std::io::ErrorKind::NotConnected, "连接不存在")))?;
+
+                    let mut pipe = redis::pipe();
+                    for key in &batch_keys {
+                        pipe.cmd("TYPE").arg(key.as_str());
+                    }
+                    pipe.query(conn)?
+                };
+
+                for v in &type_raw {
+                    let key_type = match v {
+                        redis::Value::SimpleString(s) => s.clone(),
+                        redis::Value::BulkString(s) => String::from_utf8_lossy(s).to_string(),
+                        _ => String::from("none"),
+                    };
+                    if key_type != "none" {
+                        *type_counts.entry(key_type).or_insert(0) += 1;
+                    }
+                }
+            }
+
+            if cursor == 0 {
+                break;
+            }
+        }
+
+        Ok(type_counts)
     }
 }
 

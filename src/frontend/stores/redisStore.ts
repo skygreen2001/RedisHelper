@@ -75,6 +75,7 @@ export interface MemoryInfoResponse {
   large_keys_count: number
   key_memory_list: KeyMemoryItem[]
   key_type_stats: KeyTypeStat[]
+  next_cursor: string
 }
 
 export interface ServerInfoResponse {
@@ -242,11 +243,20 @@ export const redisStore = defineStore('redis', {
       }
     },
 
-    async getMemoryInfo(params: ConnectRequest): Promise<MemoryInfoResponse> {
+    async getMemoryInfo(params: ConnectRequest, cursor?: string): Promise<MemoryInfoResponse> {
       try {
-        return await safeInvoke<MemoryInfoResponse>('get_memory_info', { req: params })
+        return await safeInvoke<MemoryInfoResponse>('get_memory_info', { req: params, cursor })
       } catch (error) {
         console.error('获取内存信息失败:', error)
+        throw error
+      }
+    },
+
+    async getTypeDistribution(params: ConnectRequest): Promise<KeyTypeStat[]> {
+      try {
+        return await safeInvoke<KeyTypeStat[]>('get_type_distribution', { req: params })
+      } catch (error) {
+        console.error('获取类型分布失败:', error)
         throw error
       }
     },
