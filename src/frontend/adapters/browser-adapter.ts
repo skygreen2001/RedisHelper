@@ -22,14 +22,14 @@ async function ensureWs(): Promise<WebSocket> {
   
   wsConnectPromise = new Promise((resolve, reject) => {
     const url = `ws://${window.location.hostname}:8765`
-    console.log('[browser-adapter] 连接 WebSocket 代理:', url)
+    debugLog('[browser-adapter] 连接 WebSocket 代理:', url)
     const socket = new WebSocket(url)
     ws = socket
     
     socket.onopen = () => {
       wsReady = true
       wsConnectPromise = null  // 连接成功后清空 Promise
-      console.log('[browser-adapter] WebSocket 代理已连接')
+      debugLog('[browser-adapter] WebSocket 代理已连接')
       resolve(socket)
     }
     
@@ -46,14 +46,14 @@ async function ensureWs(): Promise<WebSocket> {
           }
         }
       } catch (e) {
-        console.error('[browser-adapter] 解析消息失败:', e)
+        debugError('[browser-adapter] 解析消息失败:', e)
       }
     }
     
     socket.onclose = () => {
       wsReady = false
       wsConnectPromise = null  // 连接关闭后清空 Promise
-      console.log('[browser-adapter] WebSocket 代理已断开')
+      debugLog('[browser-adapter] WebSocket 代理已断开')
     }
     
     socket.onerror = () => {
@@ -96,6 +96,7 @@ async function wsProxyCall(command: string, args: Record<string, any>, extraArgs
 
 const SERVERS_KEY = 'redis-helper-servers'
 const TRASH_KEY = 'redis-helper-trash'
+const CONFIG_KEY = 'redis-helper-config'
 
 function loadFromStorage<T>(key: string): T[] {
   try {
@@ -108,6 +109,29 @@ function loadFromStorage<T>(key: string): T[] {
 
 function saveToStorage<T>(key: string, data: T[]): void {
   localStorage.setItem(key, JSON.stringify(data))
+}
+
+function loadConfig(): Record<string, any> {
+  try {
+    const data = localStorage.getItem(CONFIG_KEY)
+    return data ? JSON.parse(data) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveConfig(config: Record<string, any>): void {
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
+}
+
+// ========== 调试日志控制 ==========
+// console 对象已在 main.ts 中被全局控制
+export const debugLog = console.log.bind(console)
+export const debugError = console.error.bind(console)
+
+function isDebugEnabled(): boolean {
+  const config = loadConfig()
+  return config.debugLogEnabled ?? false
 }
 
 // ========== 服务器配置适配 ==========
@@ -341,7 +365,7 @@ async function handleTrashCommands(command: string, args: any): Promise<any> {
           key: item.key,
           value: item.value,
           key_type: item.key_type,
-        }).catch(err => console.error('恢复键失败:', err))
+        }).catch(err => debugError('恢复键失败:', err))
         items.splice(idx, 1)
         saveToStorage(TRASH_KEY, items)
       }
@@ -412,6 +436,11 @@ const PROXY_COMMANDS = new Set([
   'get_memory_info',
   'get_server_info',  // 添加这个命令
   'get_key_stats',    // 添加这个命令
+  'audit_get_logs',   // 添加审计日志获取命令
+  'audit_get_stats',  // 添加审计统计获取命令
+  'audit_clear',      // 添加审计日志清空命令
+  'set_debug_log_enabled',  // 添加调试日志设置命令
+  'get_debug_log_enabled',  // 添加调试日志获取命令
 ])
 
 // ========== 需要通过 localStorage 的服务器命令 ==========
@@ -439,17 +468,17 @@ const TRASH_COMMANDS = new Set([
 // ========== 主入口 ==========
 
 export async function browserExecute(command: string, args: any): Promise<any> {
-  console.log(`[browserExecute] 收到命令: ${command}, args:`, args)
-  console.log(`[browserExecute] args?.req:`, args?.req)
-  console.log(`[browserExecute] args?.host:`, args?.host)
+  debugLog(`[browserExecute] 收到命令: ${command}, args:`, args)
+  debugLog(`[browserExecute] args?.req:`, args?.req)
+  debugLog(`[browserExecute] args?.host:`, args?.host)
   
   // args 格式为 { req: { host, port, password, db, ... } }，需要解包
   const params = args?.req || args || {}
-  console.log(`[browserExecute] 解包后的 params:`, params)
+  debugLog(`[browserExecute] 解包后的 params:`, params)
   
   // Redis 操作 → WebSocket 代理
   if (PROXY_COMMANDS.has(command)) {
-    console.log(`[browserExecute] 转发命令 ${command} 到 WebSocket 代理`)
+    debugLog(`[browserExecute] 转发命令 ${command} 到 WebSocket 代理`)
     // generate_test_data 有额外参数 count（与 req 同级）
     if (command === 'generate_test_data') {
       const count = args?.count || 100
@@ -473,6 +502,28 @@ export async function browserExecute(command: string, args: any): Promise<any> {
     throw new Error(`${command} 在浏览器环境下由前端直接处理`)
   }
 
-  console.error(`[browserExecute] 浏览器环境不支持命令: ${command}`)
+  // 调试日志配置 → 在浏览器环境下保存到 localStorage，同时同步到 ws-proxy
+  if (command === 'get_debug_log_enabled') {
+    const enabled = isDebugEnabled()
+    return enabled
+  }
+
+  if (command === 'set_debug_log_enabled') {
+    const enabled = params.enabled ?? false
+    const config = loadConfig()
+    config.debugLogEnabled = enabled
+    saveConfig(config)
+    
+    // 同时同步到 ws-proxy
+    try {
+      await wsProxyCall('set_debug_log_enabled', { enabled })
+    } catch (err) {
+      console.warn('同步调试设置到 ws-proxy 失败:', err)
+    }
+    
+    return enabled
+  }
+
+  debugError(`[browserExecute] 浏览器环境不支持命令: ${command}`)
   throw new Error(`浏览器环境不支持命令: ${command}`)
 }

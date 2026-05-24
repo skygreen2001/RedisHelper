@@ -4,12 +4,98 @@
  * 
  * 启动方式: node server/ws-proxy.js
  * 默认端口: 8765
+ * 调试模式: DEBUG=1 node server/ws-proxy.js
  */
 
 import { WebSocketServer } from 'ws'
 import Redis from 'ioredis'
 
 const PORT = process.env.WS_PROXY_PORT || 8765
+
+// 调试模式（可通过 WebSocket 命令动态控制）
+let DEBUG_MODE = process.env.DEBUG === '1' || process.env.DEBUG === 'true'
+const originalLog = console.log
+const originalError = console.error
+
+// 更新控制台输出
+function updateConsoleOutput() {
+  if (DEBUG_MODE) {
+    // 调试模式：恢复原始 console，启用调试前缀
+    console.log = (...args) => {
+      originalLog('[debug]', ...args)
+    }
+    console.error = (...args) => {
+      originalError('[debug]', ...args)
+    }
+    console.warn = (...args) => {
+      originalWarn('[debug]', ...args)
+    }
+    console.log('[ws-proxy] 调试模式已启用')
+  } else {
+    // 非调试模式：静默大部分日志，只保留启动信息和错误信息
+    console.log = (...args) => {
+      const msg = args[0]?.toString() || ''
+      // 只保留启动信息和调试模式切换信息
+      if (msg.includes('已启动') || msg.includes('调试模式已')) {
+        originalLog(...args)
+      }
+    }
+    console.error = (...args) => {
+      // 错误信息总是输出
+      originalError(...args)
+    }
+  }
+}
+
+// 调试日志函数
+function debugLog(...args) {
+  if (DEBUG_MODE) {
+    console.log(...args)
+  }
+}
+
+function debugError(...args) {
+  if (DEBUG_MODE) {
+    console.error(...args)
+  }
+}
+
+const originalWarn = console.warn
+
+// 初始化控制台输出
+updateConsoleOutput()
+
+// 审计日志列表键名
+const AUDIT_LOG_KEY = 'redis:audit:logs'
+// 最大审计日志数量
+const MAX_AUDIT_LOGS = 1000000
+
+// 记录审计日志
+async function recordAuditLog(conn, host, port, db, command, args, success, errorMessage = null) {
+  const auditEntry = {
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    serverId: `${host}:${port}`,
+    serverName: `${host}:${port}`,
+    db,
+    clientIp: '127.0.0.1',
+    command: command.toUpperCase(),
+    args: Array.isArray(args) ? args : [],
+    costMs: 0,
+    success,
+    errorMessage: errorMessage || undefined  // 改为 undefined 以匹配前端接口
+  }
+  
+  try {
+    // 使用 LPUSH 将日志添加到列表头部
+    await conn.lpush(AUDIT_LOG_KEY, JSON.stringify(auditEntry))
+    // 使用 LTRIM 保持列表长度
+    await conn.ltrim(AUDIT_LOG_KEY, 0, MAX_AUDIT_LOGS - 1)
+    console.log(`[ws-proxy][audit] 记录审计日志: ${command} ${args.join(' ')}`)
+  } catch (err) {
+    console.error(`[ws-proxy][audit] 记录审计日志失败:`, err.message)
+  }
+}
 
 // 统一 Redis 命令执行（自动管理连接生命周期）
 async function executeRedisCommand(host, port, password, db, commandFn) {
@@ -90,6 +176,18 @@ async function executeRedisCommand(host, port, password, db, commandFn) {
 
 // 命令处理器
 const handlers = {
+  // 调试模式控制（由前端 Web 界面调用）
+  async set_debug_log_enabled({ enabled }) {
+    DEBUG_MODE = enabled === true
+    updateConsoleOutput()
+    console.log(`[ws-proxy] 调试模式已${DEBUG_MODE ? '启用' : '关闭'}（由 Web 界面控制）`)
+    return DEBUG_MODE
+  },
+
+  async get_debug_log_enabled() {
+    return DEBUG_MODE
+  },
+
   // 测试连接
   async connect({ host, port, password, db }) {
     return executeRedisCommand(host, port, password, db, async (conn) => {
@@ -257,6 +355,9 @@ const handlers = {
           value = await conn.get(key) || ''
       }
       
+      // 记录审计日志
+      await recordAuditLog(conn, host, port, db, 'GET', [key], true)
+      
       return { key, value: value || '', key_type: type }
     })
   },
@@ -293,6 +394,10 @@ const handlers = {
         default:
           await conn.set(key, value)
       }
+      
+      // 记录审计日志
+      await recordAuditLog(conn, host, port, db, 'SET', [key, value], true)
+      
       return true
     })
   },
@@ -301,6 +406,124 @@ const handlers = {
   async delete_key({ host, port, password, db, key }) {
     return executeRedisCommand(host, port, password, db, async (conn) => {
       await conn.del(key)
+      
+      // 记录审计日志
+      await recordAuditLog(conn, host, port, db, 'DEL', [key], true)
+      
+      return true
+    })
+  },
+
+  // 获取审计日志
+  async audit_get_logs({ host, port, password, db, server_id, start_time, end_time, command, limit, offset }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      console.log(`[ws-proxy][audit] 获取审计日志: server_id=${server_id}, limit=${limit}, offset=${offset}`)
+      
+      // 获取审计日志列表
+      const logs = await conn.lrange(AUDIT_LOG_KEY, offset, offset + (limit || 50) - 1)
+      
+      // 解析日志
+      const parsedLogs = logs.map(log => {
+        try {
+          return JSON.parse(log)
+        } catch {
+          return null
+        }
+      }).filter(Boolean)
+      
+      // 过滤日志
+      let filteredLogs = parsedLogs
+      
+      if (server_id) {
+        filteredLogs = filteredLogs.filter(log => log.serverId === server_id)
+      }
+      
+      if (start_time) {
+        filteredLogs = filteredLogs.filter(log => log.timestamp >= start_time)
+      }
+      
+      if (end_time) {
+        filteredLogs = filteredLogs.filter(log => log.timestamp <= end_time)
+      }
+      
+      if (command) {
+        filteredLogs = filteredLogs.filter(log => log.command === command.toUpperCase())
+      }
+      
+      console.log(`[ws-proxy][audit] 返回 ${filteredLogs.length} 条审计日志`)
+      return filteredLogs
+    })
+  },
+
+  // 获取审计统计
+  async audit_get_stats({ host, port, password, db, server_id }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      console.log(`[ws-proxy][audit] 获取审计统计: server_id=${server_id}`)
+      
+      // 获取所有审计日志
+      const logs = await conn.lrange(AUDIT_LOG_KEY, 0, -1)
+      
+      // 解析日志
+      const parsedLogs = logs.map(log => {
+        try {
+          return JSON.parse(log)
+        } catch {
+          return null
+        }
+      }).filter(Boolean)
+      
+      // 过滤指定服务器
+      let filteredLogs = parsedLogs
+      if (server_id) {
+        filteredLogs = filteredLogs.filter(log => log.serverId === server_id)
+      }
+      
+      // 按命令类型统计
+      const commandStats = {}
+      filteredLogs.forEach(log => {
+        const cmd = log.command
+        if (!commandStats[cmd]) {
+          commandStats[cmd] = { 
+            count: 0, 
+            totalCostMs: 0, 
+            successCount: 0, 
+            errorCount: 0 
+          }
+        }
+        commandStats[cmd].count++
+        commandStats[cmd].totalCostMs += log.costMs || 0
+        if (log.success) {
+          commandStats[cmd].successCount++
+        } else {
+          commandStats[cmd].errorCount++
+        }
+      })
+      
+      // 转换为前端期望的格式
+      const result = Object.entries(commandStats).map(([cmd, stats]) => ({
+        command: cmd,
+        count: stats.count,
+        totalCostMs: stats.totalCostMs,
+        avgCostMs: stats.count > 0 ? Number((stats.totalCostMs / stats.count).toFixed(2)) : 0,
+        successCount: stats.successCount,
+        errorCount: stats.errorCount,
+        successRate: stats.count > 0 ? Number(((stats.successCount / stats.count) * 100).toFixed(2)) : 0,
+      }))
+      
+      console.log(`[ws-proxy][audit] 返回统计数据:`, result)
+      return result
+    })
+  },
+
+  // 清空审计日志
+  async audit_clear({ host, port, password, db }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      console.log(`[ws-proxy][audit] 清空审计日志`)
+      
+      // 删除审计日志列表
+      await conn.del(AUDIT_LOG_KEY)
+      
+      console.log(`[ws-proxy][audit] 审计日志已清空`)
       return true
     })
   },
@@ -430,9 +653,9 @@ const handlers = {
       }
 
       return filtered.map(entry => ({
-        id: entry[0],
-        time: entry[1],
-        costMs: entry[2],
+        id: Number(entry[0]),  // 转换为普通数字，避免 BigInt 序列化问题
+        time: Number(entry[1]),  // 转换为普通数字
+        costMs: Number(entry[2]),  // 转换为普通数字（原来是微秒）
         cmd: Array.isArray(entry[3]) ? (entry[3][0] || '') : '',
         args: Array.isArray(entry[3]) ? entry[3].slice(1) : [],
         // Redis SLOWLOG 协议：entry[4]=client_addr, entry[5]=client_name（Redis 7+）
@@ -636,15 +859,19 @@ wss.on('connection', (ws) => {
       msg = JSON.parse(data.toString())
       const { id, command, args } = msg
       
-      console.log(`[ws-proxy] 收到命令:`, command, args)
+      console.log(`[ws-proxy] 收到命令: ${command}`)
+      console.log(`[ws-proxy] 命令参数:`, JSON.stringify(args, null, 2))
 
       if (!handlers[command]) {
+        console.error(`[ws-proxy] 未知命令: ${command}`)
         ws.send(JSON.stringify({ id, error: `未知命令: ${command}` }))
         return
       }
       
       // 分离额外参数（如 count）
       const extraArgs = msg.extraArgs || {}
+      console.log(`[ws-proxy] 额外参数:`, extraArgs)
+      
       const result = await handlers[command](args, ...Object.values(extraArgs))
       console.log(`[ws-proxy] 命令 ${command} 执行结果:`, result)
       ws.send(JSON.stringify({ id, result }))

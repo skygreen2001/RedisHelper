@@ -1,7 +1,55 @@
 use serde::{Deserialize, Serialize};
 
 use crate::redis::connection::{RedisConnection, SlowlogRaw, KeyMemoryItem, KeyTypeStat, MemoryInfo, KeyStatItem, KeysResponse};
+use crate::redis::audit::{AuditEntry, write_entry_to_list_sync};
 use crate::storage::config::debug_println;
+
+/// 记录审计日志的辅助函数
+fn record_audit_log(
+    host: &str,
+    port: u16,
+    password: Option<&str>,
+    db: u8,
+    command: &str,
+    args: Vec<String>,
+    success: bool,
+    error_message: Option<String>,
+) {
+    debug_println!("[AUDIT RECORD] Called for command: {} args: {:?}", command, args);
+    
+    let redis_url = match password {
+        Some(pass) if !pass.is_empty() => {
+            format!("redis://:{}@{}:{}", pass, host, port)
+        }
+        _ => {
+            format!("redis://{}:{}", host, port)
+        }
+    };
+    
+    debug_println!("[AUDIT RECORD] Redis URL: {}", redis_url);
+
+    let entry = AuditEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        timestamp: chrono::Utc::now().timestamp_millis(),
+        server_id: format!("{}:{}", host, port),
+        server_name: format!("{}:{}", host, port),
+        db,
+        client_ip: "127.0.0.1".to_string(),
+        command: command.to_string(),
+        args: args.clone(),
+        cost_ms: 0,
+        success,
+        error_message,
+    };
+
+    debug_println!("[AUDIT RECORD] Created entry: {}", serde_json::to_string(&entry).unwrap_or_default());
+
+    if let Err(e) = write_entry_to_list_sync(&redis_url, &entry, 1_000_000) {
+        debug_println!("[AUDIT] Failed to record audit log: {}", e);
+    } else {
+        debug_println!("[AUDIT] Successfully recorded: {} {}", command, args.join(" "));
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConnectRequest {
@@ -129,11 +177,40 @@ pub fn get_keys(req: ConnectRequest) -> Result<KeysResponse, String> {
 
 #[tauri::command]
 pub fn get_key_value(req: KeyRequest) -> Result<KeyValueResponse, String> {
-    match RedisConnection::new(&req.host, req.port, req.password) {
+    match RedisConnection::new(&req.host, req.port, req.password.clone()) {
         Ok(mut conn) => {
             conn.select(req.db).map_err(|e| e.to_string())?;
-            let (value, key_type) = conn.get_key_value(&req.key).map_err(|e| e.to_string())?;
-            Ok(KeyValueResponse {
+            let result = conn.get_key_value(&req.key).map_err(|e| e.to_string());
+            
+            // 记录审计日志
+            match &result {
+                Ok(_) => {
+                    record_audit_log(
+                        &req.host,
+                        req.port,
+                        req.password.as_deref(),
+                        req.db,
+                        "GET",
+                        vec![req.key.clone()],
+                        true,
+                        None,
+                    );
+                }
+                Err(e) => {
+                    record_audit_log(
+                        &req.host,
+                        req.port,
+                        req.password.as_deref(),
+                        req.db,
+                        "GET",
+                        vec![req.key.clone()],
+                        false,
+                        Some(e.clone()),
+                    );
+                }
+            }
+            
+            result.map(|(value, key_type)| KeyValueResponse {
                 key: req.key,
                 value,
                 key_type,
@@ -145,11 +222,40 @@ pub fn get_key_value(req: KeyRequest) -> Result<KeyValueResponse, String> {
 
 #[tauri::command]
 pub fn set_key_value(req: KeyValueRequest) -> Result<bool, String> {
-    match RedisConnection::new(&req.host, req.port, req.password) {
+    match RedisConnection::new(&req.host, req.port, req.password.clone()) {
         Ok(mut conn) => {
             conn.select(req.db).map_err(|e| e.to_string())?;
-            conn.set_key_value(&req.key, &req.value, &req.key_type).map_err(|e| e.to_string())?;
-            Ok(true)
+            let result = conn.set_key_value(&req.key, &req.value, &req.key_type).map_err(|e| e.to_string());
+            
+            // 记录审计日志（不记录值内容以保护敏感数据）
+            match &result {
+                Ok(_) => {
+                    record_audit_log(
+                        &req.host,
+                        req.port,
+                        req.password.as_deref(),
+                        req.db,
+                        "SET",
+                        vec![req.key.clone(), "(value hidden)".to_string()],
+                        true,
+                        None,
+                    );
+                }
+                Err(e) => {
+                    record_audit_log(
+                        &req.host,
+                        req.port,
+                        req.password.as_deref(),
+                        req.db,
+                        "SET",
+                        vec![req.key.clone(), "(value hidden)".to_string()],
+                        false,
+                        Some(e.clone()),
+                    );
+                }
+            }
+            
+            result.map(|_| true)
         }
         Err(e) => Err(e.to_string()),
     }
@@ -157,11 +263,40 @@ pub fn set_key_value(req: KeyValueRequest) -> Result<bool, String> {
 
 #[tauri::command]
 pub fn delete_key(req: KeyRequest) -> Result<bool, String> {
-    match RedisConnection::new(&req.host, req.port, req.password) {
+    match RedisConnection::new(&req.host, req.port, req.password.clone()) {
         Ok(mut conn) => {
             conn.select(req.db).map_err(|e| e.to_string())?;
-            conn.delete_key(&req.key).map_err(|e| e.to_string())?;
-            Ok(true)
+            let result = conn.delete_key(&req.key).map_err(|e| e.to_string());
+            
+            // 记录审计日志
+            match &result {
+                Ok(_) => {
+                    record_audit_log(
+                        &req.host,
+                        req.port,
+                        req.password.as_deref(),
+                        req.db,
+                        "DEL",
+                        vec![req.key.clone()],
+                        true,
+                        None,
+                    );
+                }
+                Err(e) => {
+                    record_audit_log(
+                        &req.host,
+                        req.port,
+                        req.password.as_deref(),
+                        req.db,
+                        "DEL",
+                        vec![req.key.clone()],
+                        false,
+                        Some(e.clone()),
+                    );
+                }
+            }
+            
+            result.map(|_| true)
         }
         Err(e) => Err(e.to_string()),
     }

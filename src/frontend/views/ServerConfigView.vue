@@ -90,7 +90,7 @@
     </el-table>
 
     <!-- 配置区域 -->
-    <div class="config-section">
+    <div v-if="isDev" class="config-section">
       <div class="config-item">
         <div class="config-label">
           <span class="config-title">调试日志</span>
@@ -219,7 +219,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Edit, Delete, Connection, Check, Close, Download, Upload, ChevronUp, ChevronDown } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Connection, Check, Close, Download, Upload } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { configStore } from '../stores/configStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -229,6 +229,9 @@ import { sessionManager } from '../sessions/SessionManager'
 const server = serverStore()
 const config = configStore()
 const fileInput = ref<HTMLInputElement | null>(null)
+
+// 开发环境判断
+const isDev = import.meta.env.DEV
 
 // 调试日志开关
 const debugEnabled = ref<boolean>(false)

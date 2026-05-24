@@ -99,7 +99,7 @@
                 <span v-if="isCurrentServerReadonly" class="menu-disabled-hint">（只读模式）</span>
               </el-dropdown-item>
               <el-dropdown-item command="generateTestData">
-                <el-icon><Plus /></el-icon> 生成测试数据
+                <el-icon><Plus /></el-icon> 生成数据
               </el-dropdown-item>
               <el-dropdown-item command="memory" divided>
                 <el-icon><DataAnalysis /></el-icon> 内存分析
@@ -663,7 +663,12 @@
     </el-dialog>
 
     <!-- 日志对话框 -->
-    <LogDialog v-model="showLogDialog" />
+    <LogDialog 
+      v-model="showLogDialog" 
+      :host="selectedServer?.host" 
+      :port="selectedServer?.port" 
+      :password="selectedServer?.password" 
+    />
     
     <!-- 内存分析对话框 -->
     <MemoryDialog 

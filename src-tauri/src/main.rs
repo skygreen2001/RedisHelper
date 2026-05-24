@@ -190,6 +190,13 @@ fn main() {
             commands::trash::batch_restore_from_trash,
             commands::trash::permanent_delete_trash,
             commands::trash::clear_expired_trash,
+            // 审计相关命令
+            commands::audit::audit_get_logs,
+            commands::audit::audit_get_stats,
+            commands::audit::audit_clear,
+            commands::audit::audit_get_config,
+            commands::audit::audit_update_config,
+            commands::audit::audit_generate_test_data,
             create_new_window,
             update_toggle_tab_bar_menu
         ])

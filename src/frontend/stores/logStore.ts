@@ -99,9 +99,16 @@ export const useLogStore = defineStore('log', {
         }
 
         // SLOWLOG 返回的是从新到旧排列，转换为 LogEntry 并标记来源
+        // 注意：Redis SLOWLOG 返回的 costMs 是微秒（microseconds），需要转换为毫秒
         const historyLogs: LogEntry[] = rawList
           .map((item: any, index: number) => {
             const timeStr = new Date(item.time * 1000).toLocaleTimeString()
+            // 将微秒转换为毫秒，保留两位小数
+            // 兼容 number 和 BigInt 类型（ioredis 可能返回 BigInt）
+            const costValue = item.costMs
+            const costMs = (typeof costValue === 'number' || typeof costValue === 'bigint')
+              ? Number(costValue) / 1000
+              : null
             return {
               id: `slow_${item.id ?? index}`,
               time: timeStr,
@@ -109,7 +116,7 @@ export const useLogStore = defineStore('log', {
               client: item.client || '',
               cmd: (item.cmd || '').toUpperCase(),
               args: item.args ?? [],
-              costMs: typeof item.costMs === 'number' ? Math.round(item.costMs * 100) / 100 : null,
+              costMs: costMs !== null ? Math.round(costMs * 100) / 100 : null,
             }
           })
 
