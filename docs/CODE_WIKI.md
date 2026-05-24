@@ -13,7 +13,7 @@
 | 版本 | 1.2.0 |
 | 技术栈 | Tauri 2.0 + Vue 3 + TypeScript + Pinia + Element Plus + Rust |
 | 定位 | 跨平台 Redis 管理工具（支持桌面端和Web浏览器） |
-| 前后端通信 | Tauri Commands（invoke），共 31 个命令 |
+| 前后端通信 | Tauri Commands（invoke），共 37 个命令 |
 
 ---
 
@@ -40,23 +40,26 @@ redis-helper/
 │   │   ├── serverStore.ts           # 服务器配置
 │   │   ├── trashStore.ts            # 废键箱
 │   │   ├── configStore.ts           # 应用配置状态
-│   │   └── logStore.ts              # 日志状态管理
+│   │   ├── logStore.ts              # 日志状态管理
+│   │   └── auditStore.ts            # 审计日志状态管理
 │   ├── server/                      # Web 服务器（浏览器模式）
 │   │   └── proxy.ts                 # 代理服务器，转发请求到 Tauri 后端
 │   └── help/                        # 帮助资源
 │       └── ...                      # 帮助文档/图片等资源
 ├── src-tauri/                       # Rust 后端代码
 │   ├── src/
-│   │   ├── main.rs                  # Rust 入口，注册 31 个 Tauri 命令
+│   │   ├── main.rs                  # Rust 入口，注册 37 个 Tauri 命令
 │   │   ├── commands/                # 命令层（Tauri Command）
 │   │   │   ├── mod.rs               # 模块声明
 │   │   │   ├── server.rs            # 服务器配置命令（5 个）
 │   │   │   ├── redis.rs             # Redis 操作命令（16 个）
 │   │   │   ├── export.rs            # 导入导出命令（2 个）
-│   │   │   └── trash.rs             # 废键箱命令（7 个）
+│   │   │   ├── trash.rs             # 废键箱命令（7 个）
+│   │   │   └── audit.rs             # 审计日志命令（6 个）
 │   │   ├── redis/                   # Redis 连接模块
 │   │   │   ├── mod.rs               # 模块声明
-│   │   │   └── connection.rs        # Redis 连接封装
+│   │   │   ├── connection.rs        # Redis 连接封装
+│   │   │   └── audit.rs             # 审计日志模块
 │   │   └── storage/                 # 本地存储模块
 │   │       ├── mod.rs               # 模块声明
 │   │       ├── config.rs            # 服务器配置持久化
@@ -85,6 +88,7 @@ index.html
                     │                                    └── redisStore / serverStore
                     ├── MemoryDialog ──> redisStore ──invoke──> commands::redis ──> redis::connection
                     ├── LogDialog ──> logStore ──invoke──> commands::redis ──> redis::connection
+                    │             ──> auditStore ──invoke──> commands::audit ──> redis::audit
                     ├── configStore ──> 应用配置持久化
                     ├── logStore ──> 日志状态管理
                     ├── serverStore ──invoke──> commands::server ──> storage::config
@@ -113,6 +117,7 @@ main.rs (注册所有命令)
   ├── commands::export   ──> redis::connection
   ├── commands::trash    ──> storage::trash (TrashManager)
   │                       ──> redis::connection
+  ├── commands::audit    ──> redis::audit (AuditEntry)
   └── server config import/export
         ├── export_server_config ──> storage::config (读取服务器配置并导出)
         └── import_server_config ──> storage::config (导入服务器配置)
@@ -196,9 +201,9 @@ main.rs (注册所有命令)
 
 #### LogDialog.vue
 
-慢日志对话框组件，用于查看 Redis 服务器的慢查询日志。
+慢日志与操作审计对话框组件，包含"慢日志"和"操作审计"两个 Tab 视图。
 
-**功能**：展示慢查询日志列表、查询耗时详情、慢日志筛选与分页。
+**功能**：慢日志 Tab 展示慢查询日志列表、查询耗时详情、慢日志筛选与分页；操作审计 Tab 展示 Redis 命令审计日志、命令统计、审计配置管理。
 
 #### TabBar.vue
 
@@ -298,6 +303,31 @@ Redis 操作状态管理。
 
 **功能**：记录操作日志、日志级别筛选、日志列表查询、慢日志数据管理。
 
+#### auditStore.ts
+
+审计日志状态管理，负责管理 Redis 命令审计日志的查询、统计和配置。
+
+**State**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `logs` | `AuditEntry[]` | 审计日志列表 |
+| `stats` | `CommandStats[]` | 命令统计列表 |
+| `isLoading` | `boolean` | 加载状态 |
+| `filters` | `object` | 筛选条件（server_id, command, 时间范围等） |
+| `pagination` | `object` | 分页信息（page, pageSize, total） |
+| `currentServer` | `object \| null` | 当前选中的服务器信息 |
+
+**Actions**：
+
+| Action | 后端命令 | 功能 |
+|--------|---------|------|
+| `fetchLogs()` | `audit_get_logs` | 分页查询审计日志，支持筛选 |
+| `fetchStats()` | `audit_get_stats` | 获取命令执行统计 |
+| `clearLogs()` | `audit_clear` | 清空审计日志 |
+| `generateTestData()` | `audit_generate_test_data` | 生成测试数据 |
+| `changePage()` / `changePageSize()` | — | 分页操作 |
+
 ### 4.3 会话管理层
 
 #### Session.ts
@@ -326,7 +356,7 @@ Redis 操作状态管理。
 
 ### 5.1 入口 (main.rs)
 
-注册 Tauri 插件和所有命令（共 31 个）。
+注册 Tauri 插件和所有命令（共 37 个）。
 
 | 分类 | 命令数量 | 命令列表 |
 |------|---------|---------|
@@ -335,6 +365,7 @@ Redis 操作状态管理。
 | 导入导出 | 2 | export_data, import_data |
 | 服务器配置导入导出 | 2 | export_server_config, import_server_config |
 | 废键箱 | 7 | move_to_trash, batch_move_to_trash, get_trash_items, restore_from_trash, batch_restore_from_trash, permanent_delete_trash, clear_expired_trash |
+| 审计日志 | 6 | audit_get_logs, audit_get_stats, audit_clear, audit_get_config, audit_update_config, audit_generate_test_data |
 
 ### 5.2 命令层 (commands/)
 
@@ -398,6 +429,19 @@ Redis 操作命令，16 个函数。
 | `permanent_delete_trash` | 永久删除废键箱项 |
 | `clear_expired_trash` | 清理所有过期废键箱项 |
 
+#### commands/audit.rs
+
+审计日志命令，6 个函数。
+
+| 函数 | 功能 | 参数 |
+|------|------|------|
+| `audit_get_logs` | 分页查询审计日志，支持按服务器、命令、时间范围筛选 | AuditLogRequest（host, port, password?, page, page_size, server_id?, command?, start_time?, end_time?） |
+| `audit_get_stats` | 获取命令执行统计（调用次数、平均耗时等） | AuditStatsRequest（host, port, password?, start_time?, end_time?） |
+| `audit_clear` | 清空审计日志 | host, port, password? |
+| `audit_get_config` | 获取审计配置 | 无参数 |
+| `audit_update_config` | 更新审计配置（启用/禁用、过滤命令列表） | enabled, filter_commands |
+| `audit_generate_test_data` | 生成测试审计数据 | host, port, password?, count |
+
 ### 5.3 Redis 连接模块 (redis/connection.rs)
 
 底层 Redis 操作封装，结构体 `RedisConnection`。
@@ -432,7 +476,47 @@ Redis 操作命令，16 个函数。
 | zset | JSON 序列化 | ZRANGE + JSON 反序列化 |
 | hash | JSON 序列化 | HGETALL + JSON 反序列化 |
 
-### 5.4 存储模块 (storage/)
+### 5.4 审计日志模块 (redis/audit.rs)
+
+Redis 命令审计日志的底层模块，负责审计日志的写入和读取。
+
+**AuditEntry 结构体**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | String | 唯一标识（UUID） |
+| `timestamp` | String | 记录时间（RFC3339） |
+| `server_id` | String | 服务器 ID |
+| `server_name` | String | 服务器名称 |
+| `db` | u8 | 数据库编号 |
+| `client_ip` | String | 客户端 IP |
+| `command` | String | Redis 命令 |
+| `args` | String | 命令参数 |
+| `cost_ms` | u64 | 执行耗时（毫秒） |
+| `success` | bool | 是否成功 |
+| `error_message` | Option\<String\> | 错误信息 |
+
+**CommandStats 结构体**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `command` | String | Redis 命令名 |
+| `count` | u64 | 调用次数 |
+| `total_cost_ms` | u64 | 总耗时（毫秒） |
+| `avg_cost_ms` | f64 | 平均耗时（毫秒） |
+| `success_count` | u64 | 成功次数 |
+| `error_count` | u64 | 失败次数 |
+
+**存储方式**：
+
+| 属性 | 值 |
+|------|-----|
+| 存储结构 | Redis List（LPUSH + LTRIM） |
+| Key | `redis:audit:logs` |
+| 最大条数 | 1,000,000 条（超出自动裁剪最早的记录） |
+| 写入方式 | `write_entry_to_list_sync` 函数，将 AuditEntry 序列化为 JSON 后 LPUSH 到列表头部，并执行 LTRIM 保持列表长度 |
+
+### 5.5 存储模块 (storage/)
 
 #### storage/config.rs
 
@@ -526,6 +610,17 @@ Redis 操作命令，16 个函数。
 |------|------|--------|------|
 | `export_server_config` | { file_path: String } | () | 导出服务器配置为 JSON |
 | `import_server_config` | { file_path: String } | () | 从 JSON 导入服务器配置 |
+
+### 6.6 审计日志（6 个）
+
+| 命令 | 参数 | 返回值 | 说明 |
+|------|------|--------|------|
+| `audit_get_logs` | AuditLogRequest | Vec\<AuditEntry\> | 分页查询审计日志，支持筛选 |
+| `audit_get_stats` | AuditStatsRequest | Vec\<CommandStats\> | 获取命令统计 |
+| `audit_clear` | { host, port, password? } | bool | 清空审计日志 |
+| `audit_get_config` | () | AuditConfig | 获取审计配置 |
+| `audit_update_config` | { enabled, filter_commands } | bool | 更新审计配置 |
+| `audit_generate_test_data` | { host, port, password?, count } | usize | 生成测试数据 |
 
 ---
 
