@@ -419,6 +419,7 @@ pub struct SlowlogRequest {
 pub struct SlowlogEntry {
     pub id: u64,
     pub time: u64,
+    #[serde(rename = "costMs")]
     pub cost_ms: u64,
     pub cmd: String,
     pub args: Vec<String>,

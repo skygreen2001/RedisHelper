@@ -824,7 +824,7 @@ fn parse_slowlog_entry(items: Vec<redis::Value>) -> SlowlogRaw {
 
     SlowlogRaw {
         id, time,
-        cost_ms: cost_us / 1000,
+        cost_ms: cost_us, // 直接返回微秒，与 Web 端保持一致
         cmd, args, client,
     }
 }
