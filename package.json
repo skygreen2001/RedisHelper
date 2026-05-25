@@ -21,6 +21,7 @@
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "element-plus": "^2.4.4",
+    "ioredis": "^5.10.1",
     "pinia": "^2.1.7",
     "redis": "^5.12.1",
     "sortablejs": "^1.15.7",
@@ -32,7 +33,6 @@
     "@tauri-apps/cli": "^2.0.0",
     "@types/sortablejs": "^1.15.9",
     "@vitejs/plugin-vue": "^6.0.6",
-    "ioredis": "^5.10.1",
     "typescript": "^5.2.2",
     "vite": "^8.0.12",
     "vue-tsc": "^2.2.12"
