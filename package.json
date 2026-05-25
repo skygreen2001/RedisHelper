@@ -24,7 +24,8 @@
     "pinia": "^2.1.7",
     "redis": "^5.12.1",
     "sortablejs": "^1.15.7",
-    "vue": "^3.4.0"
+    "vue": "^3.4.0",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -34,8 +35,7 @@
     "ioredis": "^5.10.1",
     "typescript": "^5.2.2",
     "vite": "^8.0.12",
-    "vue-tsc": "^2.2.12",
-    "ws": "^8.20.0"
+    "vue-tsc": "^2.2.12"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-arm64-gnu": "^4.60.3"
