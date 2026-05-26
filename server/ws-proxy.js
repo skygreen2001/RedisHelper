@@ -860,6 +860,11 @@ const server = createServer((req, res) => {
     return
   }
 
+  // WebSocket 升级路径 - 让请求继续传递给 WebSocketServer
+  if (req.url === '/ws') {
+    return
+  }
+
   // 静态文件服务（前端构建产物）
   const publicDir = join(process.cwd(), 'dist')
   let filePath = req.url === '/' ? '/index.html' : req.url

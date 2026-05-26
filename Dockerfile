@@ -11,5 +11,6 @@ RUN npm run build
 EXPOSE 10000
 EXPOSE 80/tcp
 EXPOSE 443/tcp
+EXPOSE 5173/tcp
 
 CMD ["node", "server/ws-proxy.js"]
