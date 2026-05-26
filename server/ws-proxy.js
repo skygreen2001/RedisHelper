@@ -845,7 +845,7 @@ const server = createServer((req, res) => {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Upgrade')
 
   if (req.method === 'OPTIONS') {
     res.writeHead(200)
@@ -861,7 +861,12 @@ const server = createServer((req, res) => {
   }
 
   // WebSocket 升级路径 - 让请求继续传递给 WebSocketServer
-  if (req.url === '/ws' && req.headers.upgrade === 'websocket') {
+  // 检查 upgrade 头和连接头
+  const isWebSocketUpgrade = req.headers.upgrade && 
+    req.headers.upgrade.toLowerCase() === 'websocket' &&
+    req.headers.connection &&
+    req.headers.connection.toLowerCase().includes('upgrade')
+  if (req.url === '/ws' && isWebSocketUpgrade) {
     return
   }
 

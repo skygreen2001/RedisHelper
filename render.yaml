@@ -4,7 +4,7 @@ services:
     env: node
     plan: free
     buildCommand: npm install && npm run build
-    startCommand: node server/ws-proxy.js & vite
+    startCommand: node server/ws-proxy.js
     envVars:
       - key: PORT
         value: 10000
