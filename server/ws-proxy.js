@@ -842,6 +842,12 @@ const handlers = {
 
 // 创建 HTTP 服务器
 const server = createServer((req, res) => {
+  // 调试日志：记录所有请求
+  console.log(`[http] 请求: ${req.method} ${req.url}`)
+  console.log(`[http] 主机: ${req.headers.host}`)
+  console.log(`[http] 升级头: ${req.headers.upgrade}`)
+  console.log(`[http] 连接头: ${req.headers.connection}`)
+
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
