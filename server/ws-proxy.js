@@ -9,6 +9,8 @@
 
 import { WebSocketServer } from 'ws'
 import { createServer } from 'http'
+import { createReadStream, readFileSync } from 'fs'
+import { join, extname } from 'path'
 import Redis from 'ioredis'
 
 const PORT = process.env.PORT || process.env.WS_PROXY_PORT || 10000
@@ -838,18 +840,73 @@ const handlers = {
   },
 }
 
-// 创建 HTTP 服务器用于健康检查
+// 创建 HTTP 服务器
 const server = createServer((req, res) => {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200)
+    res.end()
+    return
+  }
+
   // 健康检查端点
-  if (req.url === '/health' || req.url === '/') {
-    res.writeHead(200, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*'
-    })
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }))
-  } else {
-    res.writeHead(404, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ error: 'Not Found' }))
+    return
+  }
+
+  // 静态文件服务（前端构建产物）
+  const publicDir = join(process.cwd(), 'dist')
+  let filePath = req.url === '/' ? '/index.html' : req.url
+
+  // 安全检查：防止路径遍历
+  if (filePath.includes('..')) {
+    res.writeHead(403, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Forbidden' }))
+    return
+  }
+
+  const fullPath = join(publicDir, filePath)
+
+  // 根据文件扩展名设置 Content-Type
+  const ext = extname(filePath).toLowerCase()
+  const mimeTypes = {
+    '.html': 'text/html',
+    '.js': 'application/javascript',
+    '.css': 'text/css',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.eot': 'application/vnd.ms-fontobject'
+  }
+
+  try {
+    const data = readFileSync(fullPath)
+    const contentType = mimeTypes[ext] || 'application/octet-stream'
+    res.writeHead(200, { 'Content-Type': contentType })
+    res.end(data)
+  } catch (err) {
+    // 如果文件不存在，返回 index.html（SPA 路由）
+    try {
+      const indexPath = join(publicDir, 'index.html')
+      const indexData = readFileSync(indexPath)
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end(indexData)
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Server error', message: e.message }))
+    }
   }
 })
 

@@ -3,6 +3,16 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
+  server: {
+    proxy: {
+      '/ws': {
+        target: 'ws://localhost:10000',
+        ws: true,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ws/, '')
+      }
+    }
+  },
   build: {
     chunkSizeWarningLimit: 1000,
     rollupOptions: {

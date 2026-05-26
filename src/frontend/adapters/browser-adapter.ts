@@ -21,7 +21,8 @@ async function ensureWs(): Promise<WebSocket> {
   }
   
   wsConnectPromise = new Promise((resolve, reject) => {
-    const url = `ws://${window.location.hostname}:10000`
+    const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://'
+    const url = `${protocol}${window.location.host}/ws`
     debugLog('[browser-adapter] 连接 WebSocket 代理:', url)
     const socket = new WebSocket(url)
     ws = socket
