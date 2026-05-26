@@ -861,7 +861,7 @@ const server = createServer((req, res) => {
   }
 
   // WebSocket 升级路径 - 让请求继续传递给 WebSocketServer
-  if (req.url === '/ws') {
+  if (req.url === '/ws' && req.headers.upgrade === 'websocket') {
     return
   }
 
