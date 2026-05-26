@@ -3,14 +3,15 @@
  * 用于浏览器开发环境下转发 Redis 操作命令
  * 
  * 启动方式: node server/ws-proxy.js
- * 默认端口: 8765
+ * 默认端口: 8765 (Render使用10000)
  * 调试模式: DEBUG=1 node server/ws-proxy.js
  */
 
 import { WebSocketServer } from 'ws'
+import { createServer } from 'http'
 import Redis from 'ioredis'
 
-const PORT = process.env.WS_PROXY_PORT || 8765
+const PORT = process.env.PORT || process.env.WS_PROXY_PORT || 10000
 
 // 调试模式（可通过 WebSocket 命令动态控制）
 let DEBUG_MODE = process.env.DEBUG === '1' || process.env.DEBUG === 'true'
@@ -837,10 +838,29 @@ const handlers = {
   },
 }
 
+// 创建 HTTP 服务器用于健康检查
+const server = createServer((req, res) => {
+  // 健康检查端点
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    })
+    res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }))
+  } else {
+    res.writeHead(404, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Not Found' }))
+  }
+})
+
 // WebSocket 服务器
 const wss = new WebSocketServer({ 
-  port: PORT,
+  server: server,
   maxPayload: 100 * 1024 * 1024 // 100MB
+})
+
+server.listen(PORT, () => {
+  console.log(`[ws-proxy] Redis WebSocket 代理已启动，端口: ${PORT}`)
 })
 
 wss.on('error', (err) => {
@@ -889,5 +909,3 @@ wss.on('connection', (ws) => {
     console.error(`[ws-proxy] WebSocket 错误:`, err.message)
   })
 })
-
-console.log(`[ws-proxy] Redis WebSocket 代理已启动，端口: ${PORT}`)
