@@ -8,6 +8,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
+EXPOSE 8000
 EXPOSE 10000
 EXPOSE 80/tcp
 EXPOSE 443/tcp

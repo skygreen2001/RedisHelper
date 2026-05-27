@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node server/ws-proxy.js & vite",
-    "start": "vite",
+    "start": "node server/ws-proxy.js",
     "vite": "vite",
     "build": "vue-tsc && vite build",
     "preview": "vite preview",

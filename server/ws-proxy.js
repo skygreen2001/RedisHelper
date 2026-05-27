@@ -929,6 +929,7 @@ const server = createServer((req, res) => {
 // WebSocket 服务器
 const wss = new WebSocketServer({ 
   server: server,
+  path: '/ws',
   maxPayload: 100 * 1024 * 1024 // 100MB
 })
 
