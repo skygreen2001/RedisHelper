@@ -352,7 +352,12 @@ const handlers = {
           value = JSON.stringify(await conn.smembers(key))
           break
         case 'zset':
-          value = JSON.stringify(await conn.zrange(key, 0, -1, 'WITHSCORES'))
+          const zsetData = await conn.zrange(key, 0, -1, 'WITHSCORES')
+          const zsetPairs = []
+          for (let i = 0; i < zsetData.length; i += 2) {
+            zsetPairs.push([zsetData[i], parseFloat(zsetData[i + 1])])
+          }
+          value = JSON.stringify(zsetPairs)
           break
         default:
           value = await conn.get(key) || ''
@@ -391,6 +396,18 @@ const handlers = {
           const data = JSON.parse(value)
           if (data.length > 0) {
             await conn.sadd(key, ...data)
+          }
+          break
+        }
+        case 'zset': {
+          const data = JSON.parse(value)
+          if (data.length > 0) {
+            await conn.del(key)
+            const args = []
+            for (const [member, score] of data) {
+              args.push(Number(score), String(member))
+            }
+            await conn.zadd(key, ...args)
           }
           break
         }
@@ -836,6 +853,77 @@ const handlers = {
 
       console.log(`[ws-proxy][type-dist] 全量 TYPE 扫描完成: ${total} 个键，类型分布:`, typeCounts)
       return keyTypeStats
+    })
+  },
+
+  // ========== 元素级操作（List/Set/ZSet/Hash）==========
+
+  // List: RPUSH
+  async list_rpush({ host, port, password, db, key, value }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      return await conn.rpush(key, value)
+    })
+  },
+
+  // List: LSET
+  async list_lset({ host, port, password, db, key, index, value }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      await conn.lset(key, index, value)
+      return true
+    })
+  },
+
+  // List: LREM
+  async list_lrem({ host, port, password, db, key, count, value }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      return await conn.lrem(key, count, value)
+    })
+  },
+
+  // Set: SADD
+  async set_sadd({ host, port, password, db, key, values }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      return await conn.sadd(key, ...values)
+    })
+  },
+
+  // Set: SREM
+  async set_srem({ host, port, password, db, key, values }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      return await conn.srem(key, ...values)
+    })
+  },
+
+  // ZSet: ZADD
+  async zset_zadd({ host, port, password, db, key, members }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      const args = []
+      for (const [member, score] of members) {
+        args.push(Number(score), String(member))
+      }
+      return await conn.zadd(key, ...args)
+    })
+  },
+
+  // ZSet: ZREM
+  async zset_zrem({ host, port, password, db, key, members }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      return await conn.zrem(key, ...members)
+    })
+  },
+
+  // Hash: HSET（单个字段）
+  async hash_hset({ host, port, password, db, key, field, value }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      const result = await conn.hset(key, field, value)
+      return result > 0
+    })
+  },
+
+  // Hash: HDEL（多个字段）
+  async hash_hdel({ host, port, password, db, key, fields }) {
+    return executeRedisCommand(host, port, password, db, async (conn) => {
+      return await conn.hdel(key, ...fields)
     })
   },
 }

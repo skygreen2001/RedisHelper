@@ -734,6 +734,108 @@ impl RedisConnection {
 
         Ok(type_counts)
     }
+
+    /// List: RPUSH - 在列表尾部添加一个或多个值，返回操作后列表的长度
+    pub fn rpush(&mut self, key: &str, value: &str) -> Result<i64, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        Ok(conn.rpush(key, value)?)
+    }
+
+    /// List: LSET - 设置列表指定索引位置的值
+    pub fn lset(&mut self, key: &str, index: i64, value: &str) -> Result<(), Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        let _: () = redis::cmd("LSET").arg(key).arg(index).arg(value).query(conn)?;
+        Ok(())
+    }
+
+    /// List: LREM - 从列表中删除等于指定值的元素，count > 0 从头部删
+    pub fn lrem(&mut self, key: &str, count: i64, value: &str) -> Result<i64, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        let result: i64 = redis::cmd("LREM").arg(key).arg(count).arg(value).query(conn)?;
+        Ok(result)
+    }
+
+    /// Set: SADD - 向集合添加成员，返回新增成员数
+    pub fn sadd(&mut self, key: &str, members: &[String]) -> Result<i64, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        Ok(conn.sadd::<_, _, i64>(key, members)?)
+    }
+
+    /// Set: SREM - 从集合移除成员，返回移除数量
+    pub fn srem(&mut self, key: &str, members: &[String]) -> Result<i64, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        Ok(conn.srem::<_, _, i64>(key, members)?)
+    }
+
+    /// ZSet: ZADD - 向有序集合添加成员，返回新增成员数
+    pub fn zadd(&mut self, key: &str, members: &[(String, f64)]) -> Result<i64, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        let mut cmd = redis::cmd("ZADD");
+        let mut cmd = cmd.arg(key);
+        for (m, s) in members {
+            cmd = cmd.arg(*s).arg(m.as_str());
+        }
+        let result: i64 = cmd.query(conn)?;
+        Ok(result)
+    }
+
+    /// ZSet: ZREM - 从有序集合移除成员，返回移除数量
+    pub fn zrem(&mut self, key: &str, members: &[String]) -> Result<i64, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        let mut cmd = redis::cmd("ZREM");
+        let mut cmd = cmd.arg(key);
+        for m in members {
+            cmd = cmd.arg(m.as_str());
+        }
+        let result: i64 = cmd.query(conn)?;
+        Ok(result)
+    }
+
+    /// Hash: HSET - 设置哈希表字段值
+    pub fn hset_single(&mut self, key: &str, field: &str, value: &str) -> Result<bool, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        let result: i64 = conn.hset::<_, _, _, i64>(key, field, value)?;
+        Ok(result > 0)
+    }
+
+    /// Hash: HDEL - 删除哈希表字段
+    pub fn hdel_fields(&mut self, key: &str, fields: &[String]) -> Result<i64, Box<dyn Error>> {
+        let cache_key = self.cache_key();
+        let mut cache = get_cache().lock().unwrap();
+        let conn = cache.connections.get_mut(&cache_key)
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "连接不存在")))?;
+        let mut cmd = redis::cmd("HDEL");
+        let mut cmd = cmd.arg(key);
+        for f in fields {
+            cmd = cmd.arg(f.as_str());
+        }
+        let result: i64 = cmd.query(conn)?;
+        Ok(result)
+    }
 }
 
 /// SLOWLOG 原始条目（内部解析用，不含 Serialize）

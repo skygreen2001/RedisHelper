@@ -340,15 +340,145 @@
         <div v-if="selectedKey" class="key-detail">
           <div class="value-header">
             <div class="value-type">类型: {{ keyType.toUpperCase() }}</div>
+            <!-- 复杂类型切换编辑模式 -->
+            <div v-if="isComplexType" class="edit-mode-switch">
+              <el-radio-group v-model="sessionManager.active.editMode" size="small">
+                <el-radio-button value="overwrite">覆盖模式</el-radio-button>
+                <el-radio-button value="element">元素编辑</el-radio-button>
+              </el-radio-group>
+            </div>
           </div>
           <div class="value-content">
+            <!-- 覆盖模式：原有 textarea -->
             <el-input
+              v-if="!isComplexType || sessionManager.active.editMode === 'overwrite'"
               v-model="sessionManager.active.editKeyForm.value"
               type="textarea"
               :rows="10"
-              placeholder="请输入值"
+              :placeholder="isComplexType ? typePlaceholders[keyType] || '请输入 JSON 格式的值' : '请输入值'"
               class="value-editor"
             />
+            <!-- 元素编辑模式：Table 列表 -->
+            <div v-else class="element-editor">
+              <!-- 工具栏 -->
+              <div class="element-toolbar">
+                <el-button type="primary" size="small" @click="openAddElementDialog" :disabled="isCurrentServerReadonly">
+                  <el-icon><Plus /></el-icon>添加元素
+                </el-button>
+                <span class="element-count">ID (Total: {{ parsedElements.length }})</span>
+                <!-- ZSet 排序选择器 -->
+                <el-select
+                  v-if="keyType === 'zset'"
+                  v-model="zsetSortOrder"
+                  size="small"
+                  class="zset-sort-select"
+                  placeholder="排序方式"
+                >
+                  <el-option label="默认顺序" value="default" />
+                  <el-option label="Score 升序" value="score-asc" />
+                  <el-option label="Score 降序" value="score-desc" />
+                  <el-option label="Member A-Z" value="member-asc" />
+                  <el-option label="Member Z-A" value="member-desc" />
+                </el-select>
+                <el-input
+                  v-model="elementSearchKeyword"
+                  placeholder="输入关键字搜索"
+                  size="small"
+                  clearable
+                  class="element-search"
+                />
+              </div>
+              <!-- 元素表格 -->
+              <el-table
+                :data="filteredElements"
+                border
+                stripe
+                size="small"
+                class="element-table"
+                max-height="400"
+                empty-text="暂无数据"
+              >
+                <!-- 索引列 -->
+                <el-table-column label="ID" width="80" align="center">
+                  <template #default="{ $index }">
+                    {{ $index + 1 }}
+                  </template>
+                </el-table-column>
+                <!-- ZSet: Member 列 + Score 列 -->
+                <template v-if="keyType === 'zset'">
+                  <el-table-column label="Member" min-width="200" show-overflow-tooltip>
+                    <template #default="{ row, $index }">
+                      <div v-if="editingIndex === $index" class="inline-edit">
+                        <el-input
+                          v-model="editBuffer.value"
+                          size="small"
+                          placeholder="Member"
+                          class="value-input"
+                        />
+                        <el-input
+                          v-model.number="editBuffer.score"
+                          size="small"
+                          placeholder="Score"
+                          type="number"
+                          class="score-input"
+                        />
+                      </div>
+                      <span v-else>{{ row.value }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="Score" width="120" align="right">
+                    <template #default="{ row, $index }">
+                      <span v-if="editingIndex !== $index">{{ row.score }}</span>
+                    </template>
+                  </el-table-column>
+                </template>
+                <!-- 其他类型: Value 列 -->
+                <el-table-column v-else label="Value" min-width="200" show-overflow-tooltip>
+                  <template #default="{ row, $index }">
+                    <div v-if="editingIndex === $index" class="inline-edit">
+                      <el-input
+                        v-if="keyType === 'hash'"
+                        v-model="editBuffer.field"
+                        size="small"
+                        placeholder="Field"
+                        class="field-input"
+                      />
+                      <el-input
+                        v-model="editBuffer.value"
+                        size="small"
+                        placeholder="Value"
+                        class="value-input"
+                      />
+                    </div>
+                    <span v-else>{{ formatElementDisplay(row) }}</span>
+                  </template>
+                </el-table-column>
+                <!-- 操作列 -->
+                <el-table-column label="操作" width="180" align="center" fixed="right">
+                  <template #default="{ row, $index }">
+                    <div v-if="editingIndex === $index" class="action-group">
+                      <el-button type="success" link size="small" @click="saveElement($index)">
+                        <el-icon><Check /></el-icon>
+                      </el-button>
+                      <el-button link size="small" @click="cancelEdit">
+                        <el-icon><Close /></el-icon>
+                      </el-button>
+                    </div>
+                    <div v-else class="action-group">
+                      <el-button link size="small" @click="viewElement(row)" title="查看详情">
+                        <el-icon><Document /></el-icon>
+                      </el-button>
+                      <el-button link size="small" @click="startEdit($index)" :disabled="isCurrentServerReadonly" title="编辑">
+                        <el-icon><Edit /></el-icon>
+                      </el-button>
+                      <el-button link size="small" type="danger" @click="removeElement($index)" :disabled="isCurrentServerReadonly" title="删除">
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
           </div>
           <div class="value-actions">
             <el-button size="small" type="danger" @click="deleteKey" class="action-btn delete-btn" :disabled="isCurrentServerReadonly">
@@ -487,6 +617,71 @@
         <span class="dialog-footer">
           <el-button @click="sessionManager.active.showEditKeyDialog = false">取消</el-button>
           <el-button type="primary" @click="updateKey">确定</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 添加元素对话框（元素编辑模式） -->
+    <el-dialog
+      v-model="showAddElementDialog"
+      :title="addElementDialogTitle"
+      width="480px"
+      align-center
+      :close-on-click-modal="false"
+    >
+      <el-form :model="addElementForm" label-width="90px" @submit.enter.prevent="confirmAddElement">
+        <!-- Hash 类型：Field + Value -->
+        <template v-if="keyType === 'hash'">
+          <el-form-item label="Field" required>
+            <el-input
+              v-model="addElementForm.field"
+              placeholder="请输入 Field 名称"
+              autofocus
+            />
+          </el-form-item>
+          <el-form-item label="Value" required>
+            <el-input
+              v-model="addElementForm.value"
+              type="textarea"
+              :rows="3"
+              placeholder="请输入 Value"
+            />
+          </el-form-item>
+        </template>
+        <!-- ZSet 类型：Member + Score -->
+        <template v-else-if="keyType === 'zset'">
+          <el-form-item label="Member" required>
+            <el-input
+              v-model="addElementForm.value"
+              placeholder="请输入成员名称"
+              autofocus
+            />
+          </el-form-item>
+          <el-form-item label="Score" required>
+            <el-input
+              v-model="addElementForm.score"
+              type="number"
+              placeholder="请输入分数（数字）"
+            />
+          </el-form-item>
+        </template>
+        <!-- List / Set 类型：Value -->
+        <template v-else>
+          <el-form-item label="Value" required>
+            <el-input
+              v-model="addElementForm.value"
+              type="textarea"
+              :rows="4"
+              placeholder="请输入元素值"
+              autofocus
+            />
+          </el-form-item>
+        </template>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="showAddElementDialog = false">取消</el-button>
+          <el-button type="primary" :loading="isAddingElement" @click="confirmAddElement">确定添加</el-button>
         </span>
       </template>
     </el-dialog>
@@ -680,11 +875,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown, Check, Document, DataAnalysis, Loading } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, ArrowDown, Setting, Refresh, FolderOpened, Select, Upload, Download, SortUp, SortDown, Check, Document, DataAnalysis, Loading, Close } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { redisStore } from '../stores/redisStore'
 import { trashStore } from '../stores/trashStore'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import ServerConfigView from './ServerConfigView.vue'
 import HomeView from './HomeView.vue'
 import TabBar from '../components/TabBar.vue'
@@ -1279,6 +1474,379 @@ const typeExamples: Record<string, string> = {
   set: '["member1", "member2", "member3"]',
   zset: '[["player1", 100], ["player2", 80]]',
   hash: '{\n  "field1": "value1",\n  "field2": "value2"\n}'
+}
+
+// ========== 元素编辑模式相关 ==========
+const COMPLEX_TYPES = ['list', 'set', 'zset', 'hash']
+
+// 元素数据结构
+interface ElementItem {
+  _index: number
+  value: string
+  field?: string
+  score?: number
+}
+
+// 是否为复杂类型
+const isComplexType = computed(() => COMPLEX_TYPES.includes(keyType.value))
+
+// 元素搜索关键词
+const elementSearchKeyword = ref('')
+
+// ZSet 排序方式
+const zsetSortOrder = ref<'default' | 'score-asc' | 'score-desc' | 'member-asc' | 'member-desc'>('default')
+
+// 当前正在编辑的行索引（-1 表示未在编辑）
+const editingIndex = ref(-1)
+
+// 编辑缓冲区
+const editBuffer = ref<{ field?: string; value: string; score?: number; _index?: number }>({ value: '', _index: -1 })
+
+// 解析元素：将 JSON 字符串解析为结构化数组
+const parsedElements = computed<ElementItem[]>(() => {
+  if (!isComplexType.value || !editKeyForm.value?.value) return []
+  try {
+    const parsed = JSON.parse(editKeyForm.value.value)
+    const type = keyType.value
+    if (type === 'list' || type === 'set') {
+      return Array.isArray(parsed) ? parsed.map((v, i) => ({ _index: i, value: String(v) })) : []
+    }
+    if (type === 'zset') {
+      return Array.isArray(parsed)
+        ? parsed.map((item: any[], i) => ({
+            _index: i,
+            value: String(item[0] ?? ''),
+            score: Number(item[1] ?? 0)
+          }))
+        : []
+    }
+    if (type === 'hash' && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return Object.entries(parsed).map(([k, v], i) => ({ _index: i, field: k, value: String(v) }))
+    }
+    return []
+  } catch {
+    // 解析失败时返回空数组，提示用户使用覆盖模式
+    return []
+  }
+})
+
+// 搜索过滤后的元素（ZSet 应用排序）
+const filteredElements = computed(() => {
+  let result = parsedElements.value
+
+  // 关键字过滤
+  if (elementSearchKeyword.value.trim()) {
+    const keyword = elementSearchKeyword.value.toLowerCase()
+    result = result.filter(el => {
+      if (keyType.value === 'hash') {
+        return (el.field?.toLowerCase().includes(keyword) ?? false) ||
+               el.value.toLowerCase().includes(keyword)
+      }
+      if (keyType.value === 'zset') {
+        return el.value.toLowerCase().includes(keyword) ||
+               String(el.score ?? '').includes(keyword)
+      }
+      return el.value.toLowerCase().includes(keyword)
+    })
+  }
+
+  // ZSet 排序（基于副本，不影响原始 _index）
+  if (keyType.value === 'zset' && zsetSortOrder.value !== 'default') {
+    result = [...result]
+    switch (zsetSortOrder.value) {
+      case 'score-asc':
+        result.sort((a, b) => (a.score ?? 0) - (b.score ?? 0))
+        break
+      case 'score-desc':
+        result.sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        break
+      case 'member-asc':
+        result.sort((a, b) => a.value.localeCompare(b.value))
+        break
+      case 'member-desc':
+        result.sort((a, b) => b.value.localeCompare(a.value))
+        break
+    }
+  }
+
+  return result
+})
+
+// 格式化元素显示
+const formatElementDisplay = (row: any): string => {
+  const type = keyType.value
+  if (type === 'zset') {
+    return `${row.value} → ${row.score}`
+  }
+  if (type === 'hash') {
+    return `${row.field}: ${row.value}`
+  }
+  return row.value
+}
+
+// 查看元素详情（大文本预览）
+const viewElement = async (row: any) => {
+  const content = formatElementDisplay(row)
+  await ElMessageBox.alert(content, '元素详情', { confirmButtonText: '关闭' })
+}
+
+// 开始编辑某一行
+const startEdit = (index: number) => {
+  const realIndex = filteredElements.value[index]._index
+  const original = parsedElements.value[realIndex]
+  if (!original) return
+  editingIndex.value = index
+  editBuffer.value = {
+    ...(original.field !== undefined ? { field: original.field } : {}),
+    value: original.value,
+    ...(original.score !== undefined ? { score: original.score } : {})
+  }
+}
+
+// 取消编辑
+const cancelEdit = () => {
+  editingIndex.value = -1
+  editBuffer.value = { value: '', _index: -1 }
+}
+
+// 添加新元素 - 打开对话框
+const showAddElementDialog = ref(false)
+const isAddingElement = ref(false)
+const addElementForm = ref<{ field?: string; value: string; score: string }>({ value: '', score: '0' })
+
+// 添加元素对话框标题
+const addElementDialogTitle = computed(() => {
+  const typeMap: Record<string, string> = {
+    list: '添加 List 元素',
+    set: '添加 Set 成员',
+    zset: '添加 ZSet 成员',
+    hash: '添加 Hash 字段'
+  }
+  return typeMap[keyType.value] || '添加元素'
+})
+
+// 打开添加元素对话框
+const openAddElementDialog = () => {
+  cancelEdit()
+  // 根据类型初始化表单
+  addElementForm.value = {
+    value: '',
+    score: '0',
+    ...(keyType.value === 'hash' ? { field: '' } : {})
+  }
+  showAddElementDialog.value = true
+}
+
+// 确认添加元素
+const confirmAddElement = async () => {
+  if (!selectedServer.value || !editKeyForm.value?.key) return
+
+  const type = keyType.value
+  const form = addElementForm.value
+  const key = editKeyForm.value.key
+
+  // 校验必填字段
+  if (!form.value?.trim()) {
+    ElMessage.warning('值不能为空')
+    return
+  }
+  if (type === 'hash' && !form.field?.trim()) {
+    ElMessage.warning('Field 不能为空')
+    return
+  }
+  if (type === 'zset') {
+    const scoreNum = Number(form.score)
+    if (form.score === '' || isNaN(scoreNum)) {
+      ElMessage.warning('Score 必须是数字')
+      return
+    }
+  }
+
+  // Hash 重复字段确认
+  if (type === 'hash' && form.field) {
+    const exists = parsedElements.value.some(el => el.field === form.field)
+    if (exists) {
+      try {
+        await ElMessageBox.confirm(
+          `Field "${form.field}" 已存在，添加后将覆盖原值，是否继续？`,
+          'Field 已存在',
+          { confirmButtonText: '覆盖', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch {
+        return
+      }
+    }
+  }
+
+  isAddingElement.value = true
+  try {
+    sessionManager.active.message = ''
+
+    // 构造 buffer 并调用 Redis 添加命令
+    const buffer: any = { value: form.value }
+    if (type === 'hash') buffer.field = form.field
+    if (type === 'zset') buffer.score = Number(form.score)
+
+    await addElementToRedis(type, key, buffer)
+
+    // 刷新数据显示
+    await loadKeyValue(key)
+    showAddElementDialog.value = false
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '元素添加成功'
+  } catch (error: any) {
+    console.error('添加元素失败:', error)
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `添加失败: ${error.message || error}`
+  } finally {
+    isAddingElement.value = false
+  }
+}
+
+// 保存元素（仅修改现有元素，新增走对话框）
+const saveElement = async (tableIndex: number) => {
+  if (!selectedServer.value || !editKeyForm.value?.key) return
+
+  const type = keyType.value
+  const buffer = editBuffer.value
+  const key = editKeyForm.value.key
+
+  // 校验必填字段
+  if (!buffer.value?.trim()) {
+    ElMessage.warning('值不能为空')
+    return
+  }
+  if (type === 'hash' && !buffer.field?.trim()) {
+    ElMessage.warning('Field 不能为空')
+    return
+  }
+  if (type === 'zset' && (buffer.score === undefined || isNaN(buffer.score))) {
+    ElMessage.warning('Score 必须是数字')
+    return
+  }
+
+  try {
+    sessionManager.active.message = ''
+
+    // 修改现有元素
+    const realIndex = filteredElements.value[tableIndex]?._index
+    if (realIndex === undefined || realIndex < 0) {
+      ElMessage.warning('无法定位到要修改的元素')
+      return
+    }
+    await updateElementInRedis(type, key, realIndex, buffer, parsedElements.value)
+
+    // 刷新数据显示
+    await loadKeyValue(key)
+    cancelEdit()
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '元素修改成功'
+  } catch (error: any) {
+    console.error('保存元素失败:', error)
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `操作失败: ${error.message || error}`
+  }
+}
+
+// 调用 Redis 命令添加元素
+const addElementToRedis = async (type: string, key: string, buffer: any) => {
+  const conn = selectedServer.value!
+  if (type === 'list') {
+    await redis.rpush({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, value: buffer.value })
+  } else if (type === 'set') {
+    await redis.sadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, values: [buffer.value] })
+  } else if (type === 'zset') {
+    await redis.zadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [[buffer.value, buffer.score]] })
+  } else if (type === 'hash') {
+    await redis.hset({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, field: buffer.field, value: buffer.value })
+  }
+}
+
+// 调用 Redis 命令更新现有元素
+const updateElementInRedis = async (type: string, key: string, index: number, buffer: any, allElements: any[]) => {
+  const conn = selectedServer.value!
+  const original = allElements[index]
+  if (!original) return
+
+  if (type === 'list') {
+    // List 通过 LSET 更新指定索引的值
+    await redis.lset({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, index, value: buffer.value })
+  } else if (type === 'set') {
+    // Set 是无序集合：先删除旧值，再添加新值
+    if (original.value !== buffer.value) {
+      await redis.srem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, values: [original.value] })
+      await redis.sadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, values: [buffer.value] })
+    }
+  } else if (type === 'zset') {
+    // ZSet：先删除旧成员，再添加新成员（如果 member 变化）或仅更新分数
+    if (original.value !== buffer.value) {
+      await redis.zrem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [original.value] })
+      await redis.zadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [[buffer.value, buffer.score]] })
+    } else if (original.score !== buffer.score) {
+      // 仅分数变化，使用 ZADD 覆盖
+      await redis.zadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [[buffer.value, buffer.score]] })
+    }
+  } else if (type === 'hash') {
+    // Hash 直接 HSET 更新或新增 field
+    await redis.hset({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, field: buffer.field || original.field, value: buffer.value })
+    // 如果 field 名变了，需要删除旧的
+    if (buffer.field && original.field && buffer.field !== original.field) {
+      await redis.hdel({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, fields: [original.field] })
+    }
+  }
+}
+
+// 删除元素
+const removeElement = async (tableIndex: number) => {
+  if (!selectedServer.value || !editKeyForm.value?.key) return
+
+  const type = keyType.value
+  const key = editKeyForm.value.key
+  const realIndex = filteredElements.value[tableIndex]?._index
+  const original = realIndex !== undefined ? parsedElements.value[realIndex] : null
+  if (!original) return
+
+  // 根据类型构造确认消息
+  let confirmMsg = ''
+  if (type === 'hash') {
+    confirmMsg = `确定要删除 Field "${original.field}" 吗？`
+  } else if (type === 'zset') {
+    confirmMsg = `确定要删除成员 "${original.value}" (Score: ${original.score}) 吗？`
+  } else {
+    confirmMsg = `确定要删除 "${original.value}" 吗？`
+  }
+
+  try {
+    await ElMessageBox.confirm(confirmMsg, '确认删除', {
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+
+    sessionManager.active.message = ''
+    const conn = selectedServer.value!
+
+    // 调用对应的 Redis 删除命令
+    if (type === 'list') {
+      // List 需要通过值来删除（可能有多处相同值）
+      await redis.lrem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, count: 1, value: original.value })
+    } else if (type === 'set') {
+      await redis.srem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, values: [original.value] })
+    } else if (type === 'zset') {
+      await redis.zrem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [original.value] })
+    } else if (type === 'hash') {
+      await redis.hdel({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, fields: [original.field || ''] })
+    }
+
+    // 刷新显示
+    await loadKeyValue(key)
+    sessionManager.active.messageType = 'success'
+    sessionManager.active.message = '元素删除成功'
+  } catch (error: any) {
+    if (error === 'cancel' || error?.toString?.().includes('cancel')) return
+    sessionManager.active.messageType = 'error'
+    sessionManager.active.message = `删除失败: ${error.message || error}`
+  }
 }
 
 // 表单数据
@@ -2450,8 +3018,71 @@ const batchMoveToTrash = async () => {
   }
 }
 
+// 通用复制函数，包含回退策略
+const copyToClipboard = (text: string): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    // 优先尝试 Clipboard API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(resolve).catch(() => {
+        fallbackCopy(text, resolve, reject)
+      })
+    } else {
+      fallbackCopy(text, resolve, reject)
+    }
+  })
+}
+
+const fallbackCopy = (text: string, resolve: () => void, reject: (error: Error) => void) => {
+  const textArea = document.createElement('textarea')
+  textArea.value = text
+  textArea.style.position = 'fixed'
+  textArea.style.left = '-9999px'
+  textArea.style.top = '-9999px'
+  textArea.style.width = '1px'
+  textArea.style.height = '1px'
+  document.body.appendChild(textArea)
+  textArea.select()
+
+  try {
+    const successful = document.execCommand('copy')
+    if (successful) {
+      resolve()
+    } else {
+      reject(new Error('execCommand failed'))
+    }
+  } catch (err) {
+    reject(new Error(err instanceof Error ? err.message : '复制失败'))
+  } finally {
+    document.body.removeChild(textArea)
+  }
+}
+
 // 键盘快捷键处理
 const handleKeyDown = (event: KeyboardEvent) => {
+  // 检查焦点是否在输入框或文本区域中
+  const activeElement = document.activeElement
+  const isInputFocused = activeElement && (
+    activeElement.tagName === 'INPUT' ||
+    activeElement.tagName === 'TEXTAREA' ||
+    (activeElement as HTMLElement).isContentEditable
+  )
+
+  // Ctrl+C: 复制键名（仅在多选模式下，且焦点不在输入框时）
+  if (event.ctrlKey && !event.shiftKey && event.key === 'c') {
+    if (!isInputFocused && sessionManager.active.isMultiSelectMode && selectedKeys.value.length > 0) {
+      event.preventDefault()
+      const keysText = selectedKeys.value.join('\n')
+      copyToClipboard(keysText).then(() => {
+        sessionManager.active.messageType = 'success'
+        sessionManager.active.message = `已复制 ${selectedKeys.value.length} 个键名`
+      }).catch((err) => {
+        sessionManager.active.messageType = 'error'
+        sessionManager.active.message = `复制失败: ${err.message || err}`
+      })
+      return
+    }
+  }
+
   // Ctrl+T: 新建标签
   if (event.ctrlKey && !event.shiftKey && event.key === 't') {
     event.preventDefault()
@@ -3733,5 +4364,83 @@ const currentServerTrashCount = computed(() => {
 .fade-enter-to,
 .fade-leave-from {
   opacity: 1;
+}
+
+/* ========== 元素编辑模式样式 ========== */
+.edit-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.edit-mode-switch .el-radio-group {
+  margin-left: auto;
+}
+
+.element-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.element-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.element-count {
+  font-size: 13px;
+  color: #909399;
+  white-space: nowrap;
+}
+
+.element-search {
+  width: 220px;
+  margin-left: auto;
+}
+
+.zset-sort-select {
+  width: 140px;
+}
+
+.element-table {
+  flex: 1;
+}
+
+.element-table :deep(.el-table__header th) {
+  background-color: #f5f7fa;
+  font-weight: 600;
+  color: #303133;
+}
+
+.inline-edit {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
+.field-input {
+  width: 140px !important;
+}
+
+.value-input {
+  flex: 1 !important;
+  min-width: 150px !important;
+}
+
+.score-input {
+  width: 100px !important;
+}
+
+.action-group {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  align-items: center;
 }
 </style>

@@ -197,6 +197,16 @@ fn main() {
             commands::audit::audit_get_config,
             commands::audit::audit_update_config,
             commands::audit::audit_generate_test_data,
+            // 元素级操作命令（List/Set/ZSet/Hash）
+            commands::redis::list_rpush,
+            commands::redis::list_lset,
+            commands::redis::list_lrem,
+            commands::redis::set_sadd,
+            commands::redis::set_srem,
+            commands::redis::zset_zadd,
+            commands::redis::zset_zrem,
+            commands::redis::hash_hset,
+            commands::redis::hash_hdel,
             create_new_window,
             update_toggle_tab_bar_menu
         ])

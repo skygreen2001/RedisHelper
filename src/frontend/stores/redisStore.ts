@@ -277,6 +277,53 @@ export const redisStore = defineStore('redis', {
         console.error('获取键值统计失败:', error)
         throw error
       }
+    },
+
+    // ========== 元素级操作（List/Set/ZSet/Hash）==========
+
+    /** List: RPUSH - 在列表尾部添加一个或多个值 */
+    async rpush(params: KeyRequest & { value: string }): Promise<number> {
+      return await safeInvoke<number>('list_rpush', { req: params })
+    },
+
+    /** List: LSET - 设置列表指定索引的值 */
+    async lset(params: KeyRequest & { index: number; value: string }): Promise<boolean> {
+      return await safeInvoke<boolean>('list_lset', { req: params })
+    },
+
+    /** List: LREM - 从列表中删除等于指定值的元素 */
+    async lrem(params: KeyRequest & { count: number; value: string }): Promise<number> {
+      return await safeInvoke<number>('list_lrem', { req: params })
+    },
+
+    /** Set: SADD - 向集合添加一个或多个成员 */
+    async sadd(params: KeyRequest & { values: string[] }): Promise<number> {
+      return await safeInvoke<number>('set_sadd', { req: params })
+    },
+
+    /** Set: SREM - 从集合中移除一个或多个成员 */
+    async srem(params: KeyRequest & { values: string[] }): Promise<number> {
+      return await safeInvoke<number>('set_srem', { req: params })
+    },
+
+    /** ZSet: ZADD - 向有序集合添加一个或多个成员 */
+    async zadd(params: KeyRequest & { members: [string, number][] }): Promise<number> {
+      return await safeInvoke<number>('zset_zadd', { req: params })
+    },
+
+    /** ZSet: ZREM - 从有序集合中移除一个或多个成员 */
+    async zrem(params: KeyRequest & { members: string[] }): Promise<number> {
+      return await safeInvoke<number>('zset_zrem', { req: params })
+    },
+
+    /** Hash: HSET - 为哈希表设置字段值 */
+    async hset(params: KeyRequest & { field: string; value: string }): Promise<boolean> {
+      return await safeInvoke<boolean>('hash_hset', { req: params })
+    },
+
+    /** Hash: HDEL - 删除哈希表中的一个或多个字段 */
+    async hdel(params: KeyRequest & { fields: string[] }): Promise<number> {
+      return await safeInvoke<number>('hash_hdel', { req: params })
     }
   }
 })

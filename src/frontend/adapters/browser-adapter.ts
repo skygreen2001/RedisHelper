@@ -4,6 +4,10 @@
  * 使用 localStorage 存储服务器配置和废键箱数据
  */
 
+// ========== 全局配置 ==========
+
+export const WEBSOCKET_ENABLED = true
+
 // ========== WebSocket 代理客户端 ==========
 
 let ws: WebSocket | null = null
@@ -13,6 +17,10 @@ const pendingRequests = new Map<string, { resolve: (v: any) => void; reject: (e:
 let requestId = 0
 
 async function ensureWs(): Promise<WebSocket> {
+  if (!WEBSOCKET_ENABLED) {
+    throw new Error('WebSocket 连接功能已被禁用，请使用 Tauri 环境运行')
+  }
+  
   if (ws && wsReady) return ws
   
   // 如果已经有一个连接正在进行中，复用同一个 Promise
@@ -435,13 +443,22 @@ const PROXY_COMMANDS = new Set([
   'test_connection',
   'slowlog_get',
   'get_memory_info',
-  'get_server_info',  // 添加这个命令
-  'get_key_stats',    // 添加这个命令
-  'audit_get_logs',   // 添加审计日志获取命令
-  'audit_get_stats',  // 添加审计统计获取命令
-  'audit_clear',      // 添加审计日志清空命令
-  'set_debug_log_enabled',  // 添加调试日志设置命令
-  'get_debug_log_enabled',  // 添加调试日志获取命令
+  'get_server_info',
+  'get_key_stats',
+  'audit_get_logs',
+  'audit_get_stats',
+  'audit_clear',
+  'set_debug_log_enabled',
+  'get_debug_log_enabled',
+  'list_rpush',
+  'list_lset',
+  'list_lrem',
+  'set_sadd',
+  'set_srem',
+  'zset_zadd',
+  'zset_zrem',
+  'hash_hset',
+  'hash_hdel',
 ])
 
 // ========== 需要通过 localStorage 的服务器命令 ==========
@@ -515,11 +532,13 @@ export async function browserExecute(command: string, args: any): Promise<any> {
     config.debugLogEnabled = enabled
     saveConfig(config)
     
-    // 同时同步到 ws-proxy
-    try {
-      await wsProxyCall('set_debug_log_enabled', { enabled })
-    } catch (err) {
-      console.warn('同步调试设置到 ws-proxy 失败:', err)
+    // 同时同步到 ws-proxy（仅在 WebSocket 启用时）
+    if (WEBSOCKET_ENABLED) {
+      try {
+        await wsProxyCall('set_debug_log_enabled', { enabled })
+      } catch (err) {
+        console.warn('同步调试设置到 ws-proxy 失败:', err)
+      }
     }
     
     return enabled

@@ -79,6 +79,9 @@ export class Session {
   newKeyForm = { key: '', value: '', type: 'string' }
   editKeyForm = { key: '', value: '', type: 'string' }
 
+  // 编辑模式：'overwrite'（覆盖模式） | 'element'（元素编辑模式）
+  editMode: 'overwrite' | 'element' = 'overwrite'
+
   // 导出
   exportFileName = 'redis-export'
   exportFolderPath = ''
@@ -137,6 +140,7 @@ export class Session {
     this.keyValue = ''
     this.keyType = ''
     this.editKeyForm = { key: '', value: '', type: 'string' }
+    this.editMode = 'overwrite'
   }
 
   /** 重置多选 */

@@ -587,3 +587,206 @@ pub fn get_key_stats(req: ConnectRequest) -> Result<Vec<KeyStatItem>, String> {
         Err(e) => Err(e.to_string()),
     }
 }
+
+// ========== 元素级操作命令（List/Set/ZSet/Hash）==========
+
+/// List: RPUSH 请求
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListRpushRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db: u8,
+    pub key: String,
+    pub value: String,
+}
+
+#[tauri::command]
+pub fn list_rpush(req: ListRpushRequest) -> Result<i64, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.rpush(&req.key, &req.value).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// List: LSET 请求
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListLsetRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db: u8,
+    pub key: String,
+    pub index: i64,
+    pub value: String,
+}
+
+#[tauri::command]
+pub fn list_lset(req: ListLsetRequest) -> Result<bool, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.lset(&req.key, req.index, &req.value).map_err(|e| e.to_string()).map(|_| true)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// List: LREM 请求
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListLremRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db: u8,
+    pub key: String,
+    pub count: i64,
+    pub value: String,
+}
+
+#[tauri::command]
+pub fn list_lrem(req: ListLremRequest) -> Result<i64, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.lrem(&req.key, req.count, &req.value).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Set: SADD 请求
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetSaddRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db: u8,
+    pub key: String,
+    pub values: Vec<String>,
+}
+
+#[tauri::command]
+pub fn set_sadd(req: SetSaddRequest) -> Result<i64, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.sadd(&req.key, &req.values).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Set: SREM 请求
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetSremRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db: u8,
+    pub key: String,
+    pub values: Vec<String>,
+}
+
+#[tauri::command]
+pub fn set_srem(req: SetSremRequest) -> Result<i64, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.srem(&req.key, &req.values).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// ZSet: ZADD 请求
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ZsetZaddRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db: u8,
+    pub key: String,
+    pub members: Vec<(String, f64)>,
+}
+
+#[tauri::command]
+pub fn zset_zadd(req: ZsetZaddRequest) -> Result<i64, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.zadd(&req.key, &req.members).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// ZSet: ZREM 请求
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ZsetZremRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db: u8,
+    pub key: String,
+    pub members: Vec<String>,
+}
+
+#[tauri::command]
+pub fn zset_zrem(req: ZsetZremRequest) -> Result<i64, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.zrem(&req.key, &req.members).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Hash: HSET 请求
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HashHsetRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db: u8,
+    pub key: String,
+    pub field: String,
+    pub value: String,
+}
+
+#[tauri::command]
+pub fn hash_hset(req: HashHsetRequest) -> Result<bool, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.hset_single(&req.key, &req.field, &req.value).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Hash: HDEL 请求
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HashHdelRequest {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db: u8,
+    pub key: String,
+    pub fields: Vec<String>,
+}
+
+#[tauri::command]
+pub fn hash_hdel(req: HashHdelRequest) -> Result<i64, String> {
+    match RedisConnection::new(&req.host, req.port, req.password) {
+        Ok(mut conn) => {
+            conn.select(req.db).map_err(|e| e.to_string())?;
+            conn.hdel_fields(&req.key, &req.fields).map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
