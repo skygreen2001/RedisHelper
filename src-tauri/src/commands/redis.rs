@@ -5,6 +5,7 @@ use crate::redis::audit::{AuditEntry, write_entry_to_list_sync};
 use crate::storage::config::debug_println;
 
 /// 记录审计日志的辅助函数
+#[allow(clippy::too_many_arguments)]
 fn record_audit_log(
     host: &str,
     port: u16,
@@ -360,7 +361,7 @@ pub fn generate_test_data(req: ConnectRequest, count: u32) -> Result<bool, Strin
             conn.select(req.db).map_err(|e| e.to_string())?;
             
             let mut rng = rand::thread_rng();
-            let key_types = vec!["string", "hash", "list", "set"];
+            let key_types = ["string", "hash", "list", "set"];
             
             for i in 0..count {
                 let key_type = key_types[rng.gen_range(0..key_types.len())];

@@ -57,7 +57,7 @@ impl RedisConnection {
         
         // 缓存连接
         let cache_key = format!("{}:{}:{}:{}", host, port, 
-            password.as_ref().map(|s| s.as_str()).unwrap_or(""), 0);
+            password.as_deref().unwrap_or(""), 0);
         let mut cache = get_cache().lock().unwrap();
         cache.connections.insert(cache_key, conn);
         
@@ -124,7 +124,7 @@ impl RedisConnection {
     /// 获取连接缓存的 key
     fn cache_key(&self) -> String {
         format!("{}:{}:{}:{}", self.host, self.port, 
-            self.password.as_ref().map(|s| s.as_str()).unwrap_or(""), self.db)
+            self.password.as_deref().unwrap_or(""), self.db)
     }
     
     pub fn select(&mut self, db: u8) -> Result<(), Box<dyn Error>> {
@@ -148,7 +148,7 @@ impl RedisConnection {
     
     pub fn get_databases(&mut self) -> Result<Vec<(u8, usize)>, Box<dyn Error>> {
         let key = format!("{}:{}:{}:{}", self.host, self.port, 
-            self.password.as_ref().map(|s| s.as_str()).unwrap_or(""), 0);
+            self.password.as_deref().unwrap_or(""), 0);
         
         let mut databases = Vec::new();
         
@@ -193,7 +193,7 @@ impl RedisConnection {
         }
         
         // 按数据库编号排序
-        databases.sort_by(|a, b| a.0.cmp(&b.0));
+        databases.sort_by_key(|a| a.0);
         
         Ok(databases)
     }
@@ -251,7 +251,7 @@ impl RedisConnection {
         let value = match key_type.as_str() {
             "string" => {
                 let val: Option<String> = conn.get(key)?;
-                val.unwrap_or_else(|| "".to_string())
+                val.unwrap_or_default()
             }
             "list" => {
                 let val: Vec<String> = conn.lrange(key, 0, -1)?;
@@ -495,7 +495,7 @@ impl RedisConnection {
     /// 获取有数据的数据库的键统计（使用 INFO keyspace 命令）
     pub fn get_key_stats(&mut self) -> Result<Vec<KeyStatItem>, Box<dyn Error>> {
         let key = format!("{}:{}:{}:{}", self.host, self.port, 
-            self.password.as_ref().map(|s| s.as_str()).unwrap_or(""), 0);
+            self.password.as_deref().unwrap_or(""), 0);
         
         let mut stats = Vec::new();
         
@@ -570,7 +570,7 @@ impl RedisConnection {
     /// 扫描并获取键的内存信息（分页扫描，使用 DBSIZE 获取总数）
     /// cursor: 0 = 首次扫描，其他值 = 继续上一次扫描
     /// 返回: (key_memory_list, key_type_stats, total_keys, next_cursor)
-    pub fn scan_keys_memory(&mut self, cursor: u64) -> Result<(Vec<KeyMemoryItem>, Vec<KeyTypeStat>, usize, u64), Box<dyn Error>> {
+    pub fn scan_keys_memory(&mut self, cursor: u64) -> ScanKeysMemoryResult {
         let cache_key = self.cache_key();
         const SCAN_BATCH_SIZE: u64 = 100;
         
@@ -651,7 +651,7 @@ impl RedisConnection {
             entry.1 += size;
         }
         
-        key_memory_list.sort_by(|a, b| b.size.cmp(&a.size));
+        key_memory_list.sort_by_key(|a| std::cmp::Reverse(a.size));
         
         let total_memory: u64 = type_stats.values().map(|(_, m)| m).sum();
         let key_type_stats: Vec<KeyTypeStat> = type_stats
@@ -885,6 +885,9 @@ pub struct KeyStatItem {
     pub expires: usize,
     pub avg_ttl: u64,
 }
+
+/// 键内存扫描结果类型别名
+pub type ScanKeysMemoryResult = Result<(Vec<KeyMemoryItem>, Vec<KeyTypeStat>, usize, u64), Box<dyn Error>>;
 
 fn parse_slowlog_entry(items: Vec<redis::Value>) -> SlowlogRaw {
     let get_u64 = |idx: usize| -> u64 {
