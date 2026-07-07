@@ -63,6 +63,130 @@ fn update_toggle_tab_bar_menu(
     Ok(())
 }
 
+/// 移除 macOS 系统自动注入到 "编辑" 菜单中的系统项
+/// (如 "开始听写/Start Dictation…"、"自动填充/Autofill"、"表情与符号/Emoji & Symbols" 等)
+#[cfg(target_os = "macos")]
+fn remove_macos_system_edit_menu_items() {
+    use objc::{class, msg_send, sel, sel_impl};
+    use objc::runtime::Object;
+    use std::ffi::CStr;
+    use std::ptr::null_mut;
+
+    type ObjId = *mut Object;
+    const NIL: ObjId = null_mut();
+
+    unsafe {
+        // 获取 NSApplication::sharedApplication()
+        let app: ObjId = msg_send![class!(NSApplication), sharedApplication];
+        if app == NIL {
+            return;
+        }
+
+        // 获取 mainMenu
+        let main_menu: ObjId = msg_send![app, mainMenu];
+        if main_menu == NIL {
+            return;
+        }
+
+        // 遍历主菜单项,找到 "编辑"/"Edit" 菜单
+        let item_count: usize = msg_send![main_menu, numberOfItems];
+        for i in 0..item_count {
+            let item: ObjId = msg_send![main_menu, itemAtIndex: i as isize];
+            if item == NIL {
+                continue;
+            }
+
+            let title: ObjId = msg_send![item, title];
+            if title == NIL {
+                continue;
+            }
+
+            let title_utf8: *const u8 = msg_send![title, UTF8String];
+            if title_utf8.is_null() {
+                continue;
+            }
+
+            let title_str = CStr::from_ptr(title_utf8 as *const i8).to_string_lossy();
+            if title_str != "编辑" && title_str != "Edit" {
+                continue;
+            }
+
+            // 找到编辑菜单,获取其子菜单
+            let submenu: ObjId = msg_send![item, submenu];
+            if submenu == NIL {
+                break;
+            }
+
+            // 收集需要移除的项的索引
+            // 匹配系统自动注入的项(中英文均匹配)
+            let sub_count: usize = msg_send![submenu, numberOfItems];
+            let mut to_remove: Vec<usize> = Vec::new();
+
+            for j in 0..sub_count {
+                let sub_item: ObjId = msg_send![submenu, itemAtIndex: j as isize];
+                if sub_item == NIL {
+                    continue;
+                }
+
+                let item_title: ObjId = msg_send![sub_item, title];
+                if item_title == NIL {
+                    continue;
+                }
+
+                let item_utf8: *const u8 = msg_send![item_title, UTF8String];
+                if item_utf8.is_null() {
+                    continue;
+                }
+
+                let item_str = CStr::from_ptr(item_utf8 as *const i8).to_string_lossy();
+
+                // 判断是否是系统自动添加的项
+                let is_system_item = item_str.contains("Dictation")
+                    || item_str.contains("听写")
+                    || item_str.contains("AutoFill")
+                    || item_str.contains("自动填充")
+                    || item_str.contains("Substitutions")
+                    || item_str.contains("替换")
+                    || item_str.contains("Spelling")
+                    || item_str.contains("拼写")
+                    || item_str.contains("Transformations")
+                    || item_str.contains("变换")
+                    || item_str.contains("Speech")
+                    || item_str.contains("语音");
+
+                if is_system_item {
+                    to_remove.push(j);
+                }
+            }
+
+            // 从后往前移除,以保持索引正确
+            for j in to_remove.iter().rev() {
+                let _: () = msg_send![submenu, removeItemAtIndex: *j as isize];
+            }
+
+            // 清理尾部多余的分隔符(系统项移除后可能留下孤立分隔符)
+            loop {
+                let count: usize = msg_send![submenu, numberOfItems];
+                if count == 0 {
+                    break;
+                }
+                let last: ObjId = msg_send![submenu, itemAtIndex: (count - 1) as isize];
+                if last == NIL {
+                    break;
+                }
+                let is_separator: bool = msg_send![last, isSeparatorItem];
+                if is_separator {
+                    let _: () = msg_send![submenu, removeItemAtIndex: (count - 1) as isize];
+                } else {
+                    break;
+                }
+            }
+
+            break;
+        }
+    }
+}
+
 fn main() {
     Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -124,6 +248,17 @@ fn main() {
                         .build()?
                 )
                 .item(
+                    &SubmenuBuilder::new(app, "编辑")
+                        .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
+                        .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
+                        .separator()
+                        .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
+                        .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
+                        .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
+                        .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
+                        .build()?
+                )
+                .item(
                     &SubmenuBuilder::new(app, "窗口")
                         .item(&new_window_item)
                         .separator()
@@ -142,6 +277,11 @@ fn main() {
                 .build()?;
 
             app.set_menu(menu)?;
+
+            // macOS 会自动向 "编辑" 菜单注入系统项(开始听写、自动填充等),
+            // 这里通过原生 API 移除它们,保持编辑菜单干净。
+            #[cfg(target_os = "macos")]
+            remove_macos_system_edit_menu_items();
 
             // 监听菜单点击事件，向当前活动窗口发送
             app.on_menu_event(move |app, event| {
