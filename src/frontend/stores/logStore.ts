@@ -21,6 +21,8 @@ interface MonitorSession {
   serverName: string
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
   logs: LogEntry[]
 }
@@ -48,13 +50,14 @@ export const useLogStore = defineStore('log', {
 
   actions: {
     /** 注册一个连接（打开日志对话框时调用） */
-    registerServer(serverId: string, serverName: string, host: string, port: number, password?: string) {
+    registerServer(serverId: string, serverName: string, host: string, port: number, password?: string, username?: string) {
       if (!this.sessions[serverId]) {
         this.sessions[serverId] = {
           serverId,
           serverName,
           host,
           port,
+          username,
           password,
           logs: [],
         }
@@ -86,6 +89,7 @@ export const useLogStore = defineStore('log', {
           req: {
             host: session.host,
             port: session.port,
+            username: session.username,
             password: session.password,
           },
         })

@@ -8,6 +8,9 @@ pub struct ServerRequest {
     pub name: String,
     pub host: String,
     pub port: u16,
+    /// ACL 用户名（Redis >= 6.0），可选
+    #[serde(default)]
+    pub username: Option<String>,
     pub password: Option<String>,
     pub db: Option<u8>,
     #[serde(default)]
@@ -18,6 +21,9 @@ pub struct ServerRequest {
 pub struct TestConnectionRequest {
     pub host: String,
     pub port: u16,
+    /// ACL 用户名（Redis >= 6.0），可选
+    #[serde(default)]
+    pub username: Option<String>,
     pub password: Option<String>,
 }
 
@@ -35,6 +41,7 @@ pub fn add_server(config: ServerRequest) -> Result<Vec<ServerConfig>, String> {
         name: config.name,
         host: config.host,
         port: config.port,
+        username: config.username,
         password: config.password,
         db: config.db.unwrap_or(0),
         readonly: config.readonly,
@@ -53,6 +60,7 @@ pub fn edit_server(config: ServerRequest) -> Result<Vec<ServerConfig>, String> {
         name: config.name,
         host: config.host,
         port: config.port,
+        username: config.username,
         password: config.password,
         db: config.db.unwrap_or(0),
         readonly: config.readonly,
@@ -87,6 +95,7 @@ pub fn save_server_order(servers: Vec<ServerRequest>) -> Result<Vec<ServerConfig
             name: s.name,
             host: s.host,
             port: s.port,
+            username: s.username,
             password: s.password,
             db: s.db.unwrap_or(0),
             readonly: s.readonly,
@@ -103,8 +112,8 @@ pub fn save_server_order(servers: Vec<ServerRequest>) -> Result<Vec<ServerConfig
 #[tauri::command]
 pub fn test_connection(req: TestConnectionRequest) -> Result<TestConnectionResponse, String> {
     use crate::redis::connection::RedisConnection;
-    
-    match RedisConnection::new(&req.host, req.port, req.password) {
+
+    match RedisConnection::new_with_auth(&req.host, req.port, req.username, req.password) {
         Ok(mut conn) => {
             match conn.ping() {
                 Ok(_) => Ok(TestConnectionResponse {

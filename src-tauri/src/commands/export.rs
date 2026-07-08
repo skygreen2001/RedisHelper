@@ -8,6 +8,9 @@ use crate::redis::connection::RedisConnection;
 pub struct ExportRequest {
     pub host: String,
     pub port: u16,
+    /// ACL 用户名（Redis >= 6.0），可选
+    #[serde(default)]
+    pub username: Option<String>,
     pub password: Option<String>,
     pub db: u8,
     pub file_path: String,
@@ -17,6 +20,9 @@ pub struct ExportRequest {
 pub struct ImportRequest {
     pub host: String,
     pub port: u16,
+    /// ACL 用户名（Redis >= 6.0），可选
+    #[serde(default)]
+    pub username: Option<String>,
     pub password: Option<String>,
     pub db: u8,
     pub file_path: String,
@@ -33,7 +39,7 @@ pub fn export_data(req: ExportRequest) -> Result<bool, String> {
         return Err("文件路径不能为空".to_string());
     }
     
-    match RedisConnection::new(&req.host, req.port, req.password) {
+    match RedisConnection::new_with_auth(&req.host, req.port, req.username, req.password) {
         Ok(mut conn) => {
             conn.select(req.db).map_err(|e| e.to_string())?;
             let keys_response = conn.get_keys(None).map_err(|e| e.to_string())?;
@@ -75,7 +81,7 @@ pub fn export_data(req: ExportRequest) -> Result<bool, String> {
 
 #[tauri::command]
 pub fn import_data(req: ImportRequest) -> Result<bool, String> {
-    match RedisConnection::new(&req.host, req.port, req.password) {
+    match RedisConnection::new_with_auth(&req.host, req.port, req.username, req.password) {
         Ok(mut conn) => {
             conn.select(req.db).map_err(|e| e.to_string())?;
             

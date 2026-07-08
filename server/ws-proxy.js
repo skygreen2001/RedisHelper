@@ -101,12 +101,13 @@ async function recordAuditLog(conn, host, port, db, command, args, success, erro
 }
 
 // 统一 Redis 命令执行（自动管理连接生命周期）
-async function executeRedisCommand(host, port, password, db, commandFn) {
-  console.log(`[ws-proxy] 正在连接 Redis ${host}:${port} db=${db}`)
+async function executeRedisCommand(host, port, username, password, db, commandFn) {
+  console.log(`[ws-proxy] 正在连接 Redis ${host}:${port} db=${db} user=${username || '(default)'}`)
   
   const conn = new Redis({
     host,
     port,
+    username: username || undefined,
     password: password || undefined,
     db,
     retryStrategy: (times) => {
@@ -192,16 +193,16 @@ const handlers = {
   },
 
   // 测试连接
-  async connect({ host, port, password, db }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async connect({ host, port, username, password, db }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       await conn.ping()
       return true
     })
   },
 
   // 获取数据库列表
-  async get_databases({ host, port, password }) {
-    return executeRedisCommand(host, port, password, 0, async (conn) => {
+  async get_databases({ host, port, username, password }) {
+    return executeRedisCommand(host, port, username, password, 0, async (conn) => {
       try {
         const info = await conn.info('keyspace')
         console.log(`[ws-proxy] INFO keyspace 返回:`, info, typeof info)
@@ -237,8 +238,8 @@ const handlers = {
   },
 
   // 获取服务器信息
-  async get_server_info({ host, port, password, db }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async get_server_info({ host, port, username, password, db }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       // 使用 INFO 命令获取服务器信息
       const info = await conn.info()
       console.log(`[ws-proxy] 获取服务器信息成功, 类型:`, typeof info)
@@ -267,8 +268,8 @@ const handlers = {
   },
 
   // 获取键统计信息
-  async get_key_stats({ host, port, password }) {
-    return executeRedisCommand(host, port, password, 0, async (conn) => {
+  async get_key_stats({ host, port, username, password }) {
+    return executeRedisCommand(host, port, username, password, 0, async (conn) => {
       const info = await conn.info('keyspace')
       console.log(`[ws-proxy] get_key_stats INFO keyspace 返回:`, info, typeof info)
       
@@ -312,8 +313,8 @@ const handlers = {
   },
 
   // 获取所有键
-  async get_keys({ host, port, password, db, limit }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async get_keys({ host, port, username, password, db, limit }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       const allKeys = await conn.keys('*')
       const total = allKeys.length
       
@@ -333,8 +334,8 @@ const handlers = {
   },
 
   // 获取键值
-  async get_key_value({ host, port, password, db, key }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async get_key_value({ host, port, username, password, db, key }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       const type = await conn.type(key)
       let value = ''
       
@@ -371,8 +372,8 @@ const handlers = {
   },
 
   // 设置键值
-  async set_key_value({ host, port, password, db, key, value, key_type }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async set_key_value({ host, port, username, password, db, key, value, key_type }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       switch (key_type) {
         case 'string':
           await conn.set(key, value)
@@ -423,8 +424,8 @@ const handlers = {
   },
 
   // 删除键
-  async delete_key({ host, port, password, db, key }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async delete_key({ host, port, username, password, db, key }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       await conn.del(key)
       
       // 记录审计日志
@@ -435,8 +436,8 @@ const handlers = {
   },
 
   // 获取审计日志
-  async audit_get_logs({ host, port, password, db, server_id, start_time, end_time, command, limit, offset }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async audit_get_logs({ host, port, username, password, db, server_id, start_time, end_time, command, limit, offset }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       console.log(`[ws-proxy][audit] 获取审计日志: server_id=${server_id}, limit=${limit}, offset=${offset}`)
       
       // 获取审计日志列表
@@ -476,8 +477,8 @@ const handlers = {
   },
 
   // 获取审计统计
-  async audit_get_stats({ host, port, password, db, server_id }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async audit_get_stats({ host, port, username, password, db, server_id }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       console.log(`[ws-proxy][audit] 获取审计统计: server_id=${server_id}`)
       
       // 获取所有审计日志
@@ -536,8 +537,8 @@ const handlers = {
   },
 
   // 清空审计日志
-  async audit_clear({ host, port, password, db }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async audit_clear({ host, port, username, password, db }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       console.log(`[ws-proxy][audit] 清空审计日志`)
       
       // 删除审计日志列表
@@ -549,38 +550,38 @@ const handlers = {
   },
 
   // 搜索键
-  async search_keys({ host, port, password, db, pattern }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async search_keys({ host, port, username, password, db, pattern }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       return conn.keys(pattern)
     })
   },
 
   // 创建数据库（Redis 自动创建，只需 select）
-  async create_database({ host, port, password, db }) {
-    return executeRedisCommand(host, port, password, db, async () => {
+  async create_database({ host, port, username, password, db }) {
+    return executeRedisCommand(host, port, username, password, db, async () => {
       return true
     })
   },
 
   // 删除数据库（清空）
-  async delete_database({ host, port, password, db }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async delete_database({ host, port, username, password, db }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       await conn.flushdb()
       return true
     })
   },
 
   // 清空数据库
-  async flush_database({ host, port, password, db }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async flush_database({ host, port, username, password, db }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       await conn.flushdb()
       return true
     })
   },
 
   // 生成测试数据
-  async generate_test_data({ host, port, password, db }, count) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async generate_test_data({ host, port, username, password, db }, count) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       const keyTypes = ['string', 'hash', 'list', 'set']
       
       for (let i = 0; i < count; i++) {
@@ -618,9 +619,9 @@ const handlers = {
   },
 
   // 测试连接（独立命令）
-  async test_connection({ host, port, password }) {
+  async test_connection({ host, port, username, password }) {
     try {
-      await executeRedisCommand(host, port, password, 0, async (conn) => {
+      await executeRedisCommand(host, port, username, password, 0, async (conn) => {
         await conn.ping()
       })
       return { success: true, message: '连接成功' }
@@ -633,8 +634,8 @@ const handlers = {
   // 只读模式：不修改 Redis 配置，使用服务器原有阈值
   // SLOWLOG GET count 最多返回 slowlog-max-len 条（默认 128），超出部分 Redis 已滚动覆盖
   // 若需要更多历史，需在 redis.conf 中调大 slowlog-max-len 并重启 Redis
-  async slowlog_get({ host, port, password }) {
-    return executeRedisCommand(host, port, password, 0, async (conn) => {
+  async slowlog_get({ host, port, username, password }) {
+    return executeRedisCommand(host, port, username, password, 0, async (conn) => {
       console.log(`[ws-proxy][slowlog] 开始获取 ${host}:${port} 的 SLOWLOG...`)
 
       // 读取慢日志（不限数量，取回 Redis 当前 slowlog-max-len 范围内的全部记录）
@@ -687,8 +688,8 @@ const handlers = {
 
   // 获取内存分析信息
   // 支持 cursor 参数：首次请求不传 cursor（全量分析），后续翻页传 cursor 继续扫描
-  async get_memory_info({ host, port, password, db, cursor }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async get_memory_info({ host, port, username, password, db, cursor }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       console.log(`[ws-proxy][memory] 开始分析 ${host}:${port} db=${db} 的内存...`)
 
       // 获取内存基本信息
@@ -816,8 +817,8 @@ const handlers = {
 
   // 全量扫描键类型分布（只查 TYPE 不查 MEMORY USAGE，速度快）
   // 前端异步调用，不阻塞主界面加载
-  async get_type_distribution({ host, port, password, db }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async get_type_distribution({ host, port, username, password, db }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       console.log(`[ws-proxy][type-dist] 开始全量 TYPE 扫描 ${host}:${port} db=${db}...`)
       const BATCH_SIZE = 200
       const typeCounts = {}
@@ -859,44 +860,44 @@ const handlers = {
   // ========== 元素级操作（List/Set/ZSet/Hash）==========
 
   // List: RPUSH
-  async list_rpush({ host, port, password, db, key, value }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async list_rpush({ host, port, username, password, db, key, value }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       return await conn.rpush(key, value)
     })
   },
 
   // List: LSET
-  async list_lset({ host, port, password, db, key, index, value }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async list_lset({ host, port, username, password, db, key, index, value }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       await conn.lset(key, index, value)
       return true
     })
   },
 
   // List: LREM
-  async list_lrem({ host, port, password, db, key, count, value }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async list_lrem({ host, port, username, password, db, key, count, value }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       return await conn.lrem(key, count, value)
     })
   },
 
   // Set: SADD
-  async set_sadd({ host, port, password, db, key, values }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async set_sadd({ host, port, username, password, db, key, values }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       return await conn.sadd(key, ...values)
     })
   },
 
   // Set: SREM
-  async set_srem({ host, port, password, db, key, values }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async set_srem({ host, port, username, password, db, key, values }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       return await conn.srem(key, ...values)
     })
   },
 
   // ZSet: ZADD
-  async zset_zadd({ host, port, password, db, key, members }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async zset_zadd({ host, port, username, password, db, key, members }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       const args = []
       for (const [member, score] of members) {
         args.push(Number(score), String(member))
@@ -906,23 +907,23 @@ const handlers = {
   },
 
   // ZSet: ZREM
-  async zset_zrem({ host, port, password, db, key, members }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async zset_zrem({ host, port, username, password, db, key, members }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       return await conn.zrem(key, ...members)
     })
   },
 
   // Hash: HSET（单个字段）
-  async hash_hset({ host, port, password, db, key, field, value }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async hash_hset({ host, port, username, password, db, key, field, value }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       const result = await conn.hset(key, field, value)
       return result > 0
     })
   },
 
   // Hash: HDEL（多个字段）
-  async hash_hdel({ host, port, password, db, key, fields }) {
-    return executeRedisCommand(host, port, password, db, async (conn) => {
+  async hash_hdel({ host, port, username, password, db, key, fields }) {
+    return executeRedisCommand(host, port, username, password, db, async (conn) => {
       return await conn.hdel(key, ...fields)
     })
   },

@@ -36,95 +36,164 @@ fn get_cache() -> &'static Mutex<ConnectionCache> {
 pub struct RedisConnection {
     host: String,
     port: u16,
+    username: Option<String>,
     password: Option<String>,
     db: u8,
 }
 
+/// 构造 redis:// URL，支持 ACL 用户名（Redis >= 6.0）
+/// 仅当密码非空时才附加 :password 部分；用户名支持则总是附加（如果有）
+fn build_redis_url(host: &str, port: u16, username: Option<&str>, password: Option<&str>) -> String {
+    let user = username.map(|s| s.trim()).filter(|s| !s.is_empty());
+    let pass = password.map(|s| s.to_string()).filter(|s| !s.is_empty());
+
+    match (user, pass) {
+        (Some(u), Some(p)) => format!("redis://{}:{}@{}:{}", u, p, host, port),
+        (Some(u), None) => format!("redis://{}@{}:{}", u, host, port),
+        (None, Some(p)) => format!("redis://:{}@{}:{}", p, host, port),
+        (None, None) => format!("redis://{}:{}", host, port),
+    }
+}
+
 impl RedisConnection {
-    pub fn new(host: &str, port: u16, password: Option<String>) -> Result<Self, Box<dyn Error>> {
-        let url = match &password {
-            Some(pass) => format!("redis://:{}@{}:{}", pass, host, port),
-            None => format!("redis://{}:{}", host, port),
-        };
-        
+    /// 创建连接并支持 ACL 用户名（Redis >= 6.0）
+    pub fn new_with_auth(
+        host: &str,
+        port: u16,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Result<Self, Box<dyn Error>> {
+        let url = build_redis_url(host, port, username.as_deref(), password.as_deref());
+        debug_println!("[DEBUG] RedisConnection::new: {} (user={:?})", url, username);
+
         let client = Client::open(url)?;
         let mut conn = client.get_connection()?;
-        
-        // 发送 AUTH 命令如果有密码
-        if let Some(ref pass) = password {
-            let _: () = redis::cmd("AUTH").arg(pass).query(&mut conn)?;
+
+        // ACL（Redis >= 6.0）：先发送 AUTH <username> <password>，回退到 AUTH <password>
+        match (username.as_deref(), password.as_deref()) {
+            (Some(u), Some(p)) if !u.is_empty() => {
+                let _: () = redis::cmd("AUTH").arg(u).arg(p).query(&mut conn)?;
+            }
+            (Some(u), None) if !u.is_empty() => {
+                let _: () = redis::cmd("AUTH").arg(u).arg("").query(&mut conn)?;
+            }
+            (None, Some(p)) if !p.is_empty() => {
+                let _: () = redis::cmd("AUTH").arg(p).query(&mut conn)?;
+            }
+            _ => {}
         }
-        
+
         // 缓存连接
-        let cache_key = format!("{}:{}:{}:{}", host, port, 
-            password.as_deref().unwrap_or(""), 0);
+        let cache_key = format!(
+            "{}:{}:{}:{}:{}",
+            host,
+            port,
+            username.as_deref().unwrap_or(""),
+            password.as_deref().unwrap_or(""),
+            0
+        );
         let mut cache = get_cache().lock().unwrap();
         cache.connections.insert(cache_key, conn);
-        
-        Ok(Self { 
-            host: host.to_string(), 
-            port, 
-            password, 
-            db: 0 
+
+        Ok(Self {
+            host: host.to_string(),
+            port,
+            username,
+            password,
+            db: 0,
         })
     }
-    
-    /// 从缓存获取或创建连接
-    pub fn from_cache(host: &str, port: u16, password: Option<&str>, db: u8) 
-        -> Result<Self, Box<dyn Error>> {
-        let cache_key = format!("{}:{}:{}:{}", host, port, 
-            password.unwrap_or(""), db);
-        
-        let mut cache = get_cache().lock().unwrap();
-        
-        // 检查缓存
-        if let Some(_conn) = cache.connections.get_mut(&cache_key) {
-            // 验证连接是否存活
-            let result: Result<String, _> = redis::cmd("PING").query(_conn);
-            match result {
-                Ok(_) => {
-                    debug_println!("[DEBUG] 连接池: 复用现有连接 {}", cache_key);
-                    return Ok(Self { 
-                        host: host.to_string(), 
-                        port, 
-                        password: password.map(|s| s.to_string()), 
-                        db 
-                    });
-                }
-                Err(_) => {
-                    debug_println!("[DEBUG] 连接池: 连接已失效，移除 {}", cache_key);
-                    cache.connections.remove(&cache_key);
+
+    /// 从缓存获取或创建连接，支持 ACL 用户名
+    pub fn from_cache(
+        host: &str,
+        port: u16,
+        username: Option<&str>,
+        password: Option<&str>,
+        db: u8,
+    ) -> Result<Self, Box<dyn Error>> {
+        let user_trim = username.map(|s| s.trim()).filter(|s| !s.is_empty());
+        let cache_key = format!(
+            "{}:{}:{}:{}:{}",
+            host,
+            port,
+            user_trim.unwrap_or(""),
+            password.unwrap_or(""),
+            db
+        );
+
+        {
+            let mut cache = get_cache().lock().unwrap();
+
+            // 检查缓存
+            if let Some(_conn) = cache.connections.get_mut(&cache_key) {
+                // 验证连接是否存活
+                let result: Result<String, _> = redis::cmd("PING").query(_conn);
+                match result {
+                    Ok(_) => {
+                        debug_println!("[DEBUG] 连接池: 复用现有连接 {}", cache_key);
+                        return Ok(Self {
+                            host: host.to_string(),
+                            port,
+                            username: user_trim.map(|s| s.to_string()),
+                            password: password.map(|s| s.to_string()),
+                            db,
+                        });
+                    }
+                    Err(_) => {
+                        debug_println!("[DEBUG] 连接池: 连接已失效，移除 {}", cache_key);
+                        cache.connections.remove(&cache_key);
+                    }
                 }
             }
         }
-        
+
         // 创建新连接
         debug_println!("[DEBUG] 连接池: 创建新连接 {}", cache_key);
-        let url = match password {
-            Some(pass) => format!("redis://:{}@{}:{}", pass, host, port),
-            None => format!("redis://{}:{}", host, port),
-        };
-        
+        let url = build_redis_url(host, port, user_trim, password);
+
         let client = Client::open(url)?;
         let mut conn = client.get_connection()?;
-        
+
+        // ACL（Redis >= 6.0）：根据是否提供用户名/密码分别处理
+        match (user_trim, password) {
+            (Some(u), Some(p)) if !p.is_empty() => {
+                let _: () = redis::cmd("AUTH").arg(u).arg(p).query(&mut conn)?;
+            }
+            (Some(u), None) => {
+                let _: () = redis::cmd("AUTH").arg(u).arg("").query(&mut conn)?;
+            }
+            (None, Some(p)) if !p.is_empty() => {
+                let _: () = redis::cmd("AUTH").arg(p).query(&mut conn)?;
+            }
+            _ => {}
+        }
+
         // 选择数据库
         let _: () = redis::cmd("SELECT").arg(db).query(&mut conn)?;
-        
+
+        let mut cache = get_cache().lock().unwrap();
         cache.connections.insert(cache_key, conn);
-        
-        Ok(Self { 
-            host: host.to_string(), 
-            port, 
-            password: password.map(|s| s.to_string()), 
-            db 
+
+        Ok(Self {
+            host: host.to_string(),
+            port,
+            username: user_trim.map(|s| s.to_string()),
+            password: password.map(|s| s.to_string()),
+            db,
         })
     }
     
     /// 获取连接缓存的 key
     fn cache_key(&self) -> String {
-        format!("{}:{}:{}:{}", self.host, self.port, 
-            self.password.as_deref().unwrap_or(""), self.db)
+        format!(
+            "{}:{}:{}:{}:{}",
+            self.host,
+            self.port,
+            self.username.as_deref().unwrap_or(""),
+            self.password.as_deref().unwrap_or(""),
+            self.db
+        )
     }
     
     pub fn select(&mut self, db: u8) -> Result<(), Box<dyn Error>> {
@@ -147,8 +216,14 @@ impl RedisConnection {
     }
     
     pub fn get_databases(&mut self) -> Result<Vec<(u8, usize)>, Box<dyn Error>> {
-        let key = format!("{}:{}:{}:{}", self.host, self.port, 
-            self.password.as_deref().unwrap_or(""), 0);
+        let key = format!(
+            "{}:{}:{}:{}:{}",
+            self.host,
+            self.port,
+            self.username.as_deref().unwrap_or(""),
+            self.password.as_deref().unwrap_or(""),
+            0
+        );
         
         let mut databases = Vec::new();
         
@@ -494,8 +569,14 @@ impl RedisConnection {
     
     /// 获取有数据的数据库的键统计（使用 INFO keyspace 命令）
     pub fn get_key_stats(&mut self) -> Result<Vec<KeyStatItem>, Box<dyn Error>> {
-        let key = format!("{}:{}:{}:{}", self.host, self.port, 
-            self.password.as_deref().unwrap_or(""), 0);
+        let key = format!(
+            "{}:{}:{}:{}:{}",
+            self.host,
+            self.port,
+            self.username.as_deref().unwrap_or(""),
+            self.password.as_deref().unwrap_or(""),
+            0
+        );
         
         let mut stats = Vec::new();
         

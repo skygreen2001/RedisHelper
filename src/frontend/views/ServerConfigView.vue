@@ -36,6 +36,7 @@
       style="width: 100%"
       stripe
       row-key="id"
+      :max-height="400"
     >
       <el-table-column label="排序" width="60" align="center">
         <template #default="{ row }">
@@ -57,7 +58,6 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="id" label="标识" width="120" />
       <el-table-column prop="name" label="名称" width="180" />
       <el-table-column prop="host" label="服务器" width="180" />
       <el-table-column prop="port" label="端口" width="100" />
@@ -112,9 +112,6 @@
       width="500px"
     >
       <el-form :model="serverForm" label-width="80px">
-        <el-form-item label="标识" required>
-          <el-input v-model="serverForm.id" placeholder="输入服务器标识" />
-        </el-form-item>
         <el-form-item label="名称" required>
           <el-input v-model="serverForm.name" placeholder="输入服务器名称" />
         </el-form-item>
@@ -125,7 +122,11 @@
           <el-input-number v-model="serverForm.port" :min="1" :max="65535" />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="serverForm.password" type="password" placeholder="输入密码" />
+          <el-input v-model="serverForm.password" type="password" placeholder="输入密码" show-password />
+        </el-form-item>
+        <el-form-item label="用户名">
+          <el-input v-model="serverForm.username" placeholder="ACL in Redis >= 6.0" clearable />
+          <span class="username-hint">Redis 6.0+ 访问控制列表（ACL）用户，可选</span>
         </el-form-item>
         <el-form-item label="默认DB">
           <el-input-number v-model="serverForm.db" :min="0" :max="15" />
@@ -150,9 +151,6 @@
       width="500px"
     >
       <el-form :model="serverForm" label-width="80px">
-        <el-form-item label="标识" required>
-          <el-input v-model="serverForm.id" disabled />
-        </el-form-item>
         <el-form-item label="名称" required>
           <el-input v-model="serverForm.name" placeholder="输入服务器名称" />
         </el-form-item>
@@ -163,7 +161,11 @@
           <el-input-number v-model="serverForm.port" :min="1" :max="65535" />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="serverForm.password" type="password" placeholder="输入密码" />
+          <el-input v-model="serverForm.password" type="password" placeholder="输入密码" show-password />
+        </el-form-item>
+        <el-form-item label="用户名">
+          <el-input v-model="serverForm.username" placeholder="ACL in Redis >= 6.0" clearable />
+          <span class="username-hint">Redis 6.0+ 访问控制列表（ACL）用户，可选</span>
         </el-form-item>
         <el-form-item label="默认DB">
           <el-input-number v-model="serverForm.db" :min="0" :max="15" />
@@ -205,7 +207,7 @@
     >
       <div class="delete-confirm">
         <el-icon class="delete-confirm-icon"><Delete /></el-icon>
-        <p>删除后将不能恢复，确认要删除{{ selectedServer?.name }}[{{ selectedServer?.id }}]?</p>
+        <p>删除后将不能恢复，确认要删除{{ selectedServer?.name }}?</p>
       </div>
       <template #footer>
         <span class="dialog-footer">
@@ -218,7 +220,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { Plus, Edit, Delete, Connection, Check, Close, Download, Upload } from '@element-plus/icons-vue'
 import { serverStore } from '../stores/serverStore'
 import { configStore } from '../stores/configStore'
@@ -249,8 +251,16 @@ const serverForm = ref({
   host: '',
   port: 6379,
   password: '',
+  username: '',
   db: 0,
   readonly: false
+})
+
+// 监听名称变化，自动同步标识（仅在添加对话框打开时）
+watch(() => serverForm.value.name, (newName) => {
+  if (showAddDialog.value) {
+    serverForm.value.id = newName
+  }
 })
 
 // 选中的服务器
@@ -278,6 +288,7 @@ const addServer = async () => {
       host: serverForm.value.host,
       port: serverForm.value.port,
       password: serverForm.value.password || undefined,
+      username: serverForm.value.username.trim() || undefined,
       db: serverForm.value.db,
       readonly: serverForm.value.readonly
     })
@@ -295,6 +306,7 @@ const editServer = (row: any) => {
     host: row.host,
     port: row.port,
     password: row.password || '',
+    username: row.username || '',
     db: row.db,
     readonly: row.readonly || false
   }
@@ -309,6 +321,7 @@ const updateServer = async () => {
       host: serverForm.value.host,
       port: serverForm.value.port,
       password: serverForm.value.password || undefined,
+      username: serverForm.value.username.trim() || undefined,
       db: serverForm.value.db,
       readonly: serverForm.value.readonly
     })
@@ -319,6 +332,12 @@ const updateServer = async () => {
 }
 
 const confirmDelete = (row: any) => {
+  // 不允许删除当前正在连接的服务器
+  const activeServer = sessionManager.active.selectedServer
+  if (activeServer && activeServer.id === row.id) {
+    ElMessage.warning('不能删除当前正在连接的服务器，请先切换到其他连接')
+    return
+  }
   selectedServer.value = row
   showDeleteDialog.value = true
 }
@@ -382,7 +401,8 @@ const testConnection = async (row: any) => {
     const result = await server.testConnection({
       host: row.host,
       port: row.port,
-      password: row.password
+      password: row.password,
+      username: row.username
     })
     testResult.value = result
     showTestDialog.value = true
@@ -398,6 +418,7 @@ const resetForm = () => {
     host: '',
     port: 6379,
     password: '',
+    username: '',
     db: 0,
     readonly: false
   }
@@ -418,6 +439,7 @@ const exportConfig = async () => {
       name: s.name,
       host: s.host,
       port: s.port,
+      username: s.username,
       password: s.password,
       db: s.db,
       readonly: s.readonly
@@ -500,6 +522,7 @@ const handleFileSelect = async (event: Event) => {
           host: s.host,
           port: s.port,
           password: s.password,
+          username: s.username,
           db: s.db || 0,
           readonly: s.readonly || false
         })
@@ -665,7 +688,6 @@ onMounted(async () => {
   border-radius: 4px;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  max-height: 400px;
 }
 
 /* 排序按钮 */
@@ -912,5 +934,13 @@ onMounted(async () => {
   margin-left: 12px;
   font-size: 12px;
   color: #909399;
+}
+
+.username-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.4;
 }
 </style>

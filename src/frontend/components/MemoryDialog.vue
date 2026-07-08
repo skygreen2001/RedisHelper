@@ -472,9 +472,9 @@ function handleClose() {
   // 重置状态
 }
 
-const currentServerInfo = ref<{ host: string; port: number; password?: string; db: number } | null>(null)
+const currentServerInfo = ref<{ host: string; port: number; username?: string; password?: string; db: number } | null>(null)
 
-async function load(serverInfo: { host: string; port: number; password?: string; db: number }) {
+async function load(serverInfo: { host: string; port: number; username?: string; password?: string; db: number }) {
   currentServerInfo.value = serverInfo
   loading.value = true
   typeStatsComplete.value = false

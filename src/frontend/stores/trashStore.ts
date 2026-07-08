@@ -4,6 +4,8 @@ import { safeInvoke } from '../utils/tauri'
 interface MoveToTrashRequest {
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
   db: number
   key: string
@@ -12,6 +14,8 @@ interface MoveToTrashRequest {
 interface BatchMoveToTrashRequest {
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
   db: number
   keys: string[]

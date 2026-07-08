@@ -4,6 +4,8 @@ import { safeInvoke } from '../utils/tauri'
 interface ConnectRequest {
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
   db: number
   limit?: number // 可选的键数量限制
@@ -12,6 +14,8 @@ interface ConnectRequest {
 interface KeyRequest {
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
   db: number
   key: string
@@ -20,6 +24,8 @@ interface KeyRequest {
 interface KeyValueRequest {
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
   db: number
   key: string
@@ -30,6 +36,8 @@ interface KeyValueRequest {
 interface SearchRequest {
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
   db: number
   pattern: string
@@ -38,6 +46,8 @@ interface SearchRequest {
 interface ExportRequest {
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
   db: number
   file_path: string

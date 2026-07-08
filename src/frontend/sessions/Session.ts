@@ -11,6 +11,7 @@ export interface ServerConfig {
   name: string
   host: string
   port: number
+  username?: string
   password?: string
   db: number
   readonly: boolean
@@ -113,6 +114,7 @@ export class Session {
     return {
       host: this.selectedServer.host,
       port: this.selectedServer.port,
+      username: this.selectedServer.username,
       password: this.selectedServer.password,
       db: this.selectedDb ?? 0,
     }

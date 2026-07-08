@@ -150,6 +150,7 @@ interface ServerConfig {
   name: string
   host: string
   port: number
+  username?: string
   password?: string
   db: number
   readonly: boolean
@@ -171,6 +172,7 @@ function handleServerCommands(command: string, args: any): any {
         name: config.name,
         host: config.host,
         port: config.port,
+        username: config.username,
         password: config.password,
         db: config.db || 0,
         readonly: config.readonly || false,
@@ -191,6 +193,7 @@ function handleServerCommands(command: string, args: any): any {
           name: config.name,
           host: config.host,
           port: config.port,
+          username: config.username,
           password: config.password,
           db: config.db || 0,
           readonly: config.readonly || false,
@@ -231,6 +234,7 @@ interface TrashItem {
   key_type: string
   host: string
   port: number
+  username?: string
   password?: string
   db: number
   deleted_at: string
@@ -273,6 +277,7 @@ async function handleTrashCommands(command: string, args: any): Promise<any> {
       const keyValue = await wsProxyCall('get_key_value', {
         host: args.host,
         port: args.port,
+        username: args.username,
         password: args.password,
         db: args.db,
         key: args.key
@@ -286,6 +291,7 @@ async function handleTrashCommands(command: string, args: any): Promise<any> {
         key_type: keyValue.key_type,
         host: args.host,
         port: args.port,
+        username: args.username,
         password: args.password,
         db: args.db,
         deleted_at: now.toISOString(),
@@ -298,6 +304,7 @@ async function handleTrashCommands(command: string, args: any): Promise<any> {
       await wsProxyCall('delete_key', {
         host: args.host,
         port: args.port,
+        username: args.username,
         password: args.password,
         db: args.db,
         key: args.key
@@ -318,6 +325,7 @@ async function handleTrashCommands(command: string, args: any): Promise<any> {
           const keyValue = await wsProxyCall('get_key_value', {
             host: args.host,
             port: args.port,
+            username: args.username,
             password: args.password,
             db: args.db,
             key
@@ -331,6 +339,7 @@ async function handleTrashCommands(command: string, args: any): Promise<any> {
             key_type: keyValue.key_type,
             host: args.host,
             port: args.port,
+            username: args.username,
             password: args.password,
             db: args.db,
             deleted_at: now.toISOString(),
@@ -351,6 +360,7 @@ async function handleTrashCommands(command: string, args: any): Promise<any> {
           await wsProxyCall('delete_key', {
             host: args.host,
             port: args.port,
+            username: args.username,
             password: args.password,
             db: args.db,
             key
@@ -369,6 +379,7 @@ async function handleTrashCommands(command: string, args: any): Promise<any> {
         wsProxyCall('set_key_value', {
           host: item.host,
           port: item.port,
+          username: item.username,
           password: item.password,
           db: item.db,
           key: item.key,
@@ -391,6 +402,7 @@ async function handleTrashCommands(command: string, args: any): Promise<any> {
           wsProxyCall('set_key_value', {
             host: item.host,
             port: item.port,
+            username: item.username,
             password: item.password,
             db: item.db,
             key: item.key,

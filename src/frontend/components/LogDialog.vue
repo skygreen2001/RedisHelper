@@ -298,7 +298,7 @@ import { useAuditStore } from '../stores/auditStore'
 import { isTauriEnv } from '../utils/tauri'
 import { Search, Delete, Plus, DataAnalysis, Clock, Check, InfoFilled } from '@element-plus/icons-vue'
 
-const props = defineProps<{ modelValue: boolean; host?: string; port?: number; password?: string }>()
+const props = defineProps<{ modelValue: boolean; host?: string; port?: number; username?: string; password?: string }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 
 const visible = computed({
@@ -544,7 +544,7 @@ watch(visible, (isOpen) => {
       
       // 同时初始化审计存储
       if (props.host && props.port) {
-        auditStore.setCurrentServer(props.host, props.port, props.password)
+        auditStore.setCurrentServer(props.host, props.port, props.password, props.username)
       }
     })
   }

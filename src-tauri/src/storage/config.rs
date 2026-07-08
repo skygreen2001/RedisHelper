@@ -11,6 +11,9 @@ pub struct ServerConfig {
     pub name: String,
     pub host: String,
     pub port: u16,
+    /// ACL 用户名（Redis >= 6.0），可选
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
     pub password: Option<String>,
     pub db: u8,
     #[serde(default)]

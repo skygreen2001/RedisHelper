@@ -858,11 +858,12 @@
     </el-dialog>
 
     <!-- 日志对话框 -->
-    <LogDialog 
-      v-model="showLogDialog" 
-      :host="selectedServer?.host" 
-      :port="selectedServer?.port" 
-      :password="selectedServer?.password" 
+    <LogDialog
+      v-model="showLogDialog"
+      :host="selectedServer?.host"
+      :port="selectedServer?.port"
+      :username="selectedServer?.username"
+      :password="selectedServer?.password"
     />
     
     <!-- 内存分析对话框 -->
@@ -1350,6 +1351,7 @@ const handleOpenMemory = async () => {
     await memoryDialogRef.value.load({
       host: srv.host,
       port: srv.port,
+      username: srv.username,
       password: srv.password,
       db: db
     })
@@ -1365,7 +1367,7 @@ const handleOpenLog = () => {
     return
   }
   // 注册当前连接到 logStore（幂等，重复注册无副作用）
-  logStore.registerServer(srv.id, srv.name, srv.host, srv.port, srv.password)
+  logStore.registerServer(srv.id, srv.name, srv.host, srv.port, srv.password, srv.username)
   showLogDialog.value = true
   // 自动加载历史
   logStore.setActiveServer(srv.id)
@@ -1388,6 +1390,7 @@ const handleGenerateTestData = async () => {
     await redis.generateTestData({
       host: server.host,
       port: server.port,
+      username: server.username,
       password: server.password,
       db
     }, 100)
@@ -1435,6 +1438,7 @@ const handleFlush = async () => {
     await redis.flushDatabase({
       host: server.host,
       port: server.port,
+      username: server.username,
       password: server.password,
       db
     })
@@ -1752,13 +1756,13 @@ const saveElement = async (tableIndex: number) => {
 const addElementToRedis = async (type: string, key: string, buffer: any) => {
   const conn = selectedServer.value!
   if (type === 'list') {
-    await redis.rpush({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, value: buffer.value })
+    await redis.rpush({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, value: buffer.value })
   } else if (type === 'set') {
-    await redis.sadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, values: [buffer.value] })
+    await redis.sadd({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, values: [buffer.value] })
   } else if (type === 'zset') {
-    await redis.zadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [[buffer.value, buffer.score]] })
+    await redis.zadd({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, members: [[buffer.value, buffer.score]] })
   } else if (type === 'hash') {
-    await redis.hset({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, field: buffer.field, value: buffer.value })
+    await redis.hset({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, field: buffer.field, value: buffer.value })
   }
 }
 
@@ -1770,28 +1774,28 @@ const updateElementInRedis = async (type: string, key: string, index: number, bu
 
   if (type === 'list') {
     // List 通过 LSET 更新指定索引的值
-    await redis.lset({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, index, value: buffer.value })
+    await redis.lset({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, index, value: buffer.value })
   } else if (type === 'set') {
     // Set 是无序集合：先删除旧值，再添加新值
     if (original.value !== buffer.value) {
-      await redis.srem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, values: [original.value] })
-      await redis.sadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, values: [buffer.value] })
+      await redis.srem({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, values: [original.value] })
+      await redis.sadd({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, values: [buffer.value] })
     }
   } else if (type === 'zset') {
     // ZSet：先删除旧成员，再添加新成员（如果 member 变化）或仅更新分数
     if (original.value !== buffer.value) {
-      await redis.zrem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [original.value] })
-      await redis.zadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [[buffer.value, buffer.score]] })
+      await redis.zrem({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, members: [original.value] })
+      await redis.zadd({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, members: [[buffer.value, buffer.score]] })
     } else if (original.score !== buffer.score) {
       // 仅分数变化，使用 ZADD 覆盖
-      await redis.zadd({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [[buffer.value, buffer.score]] })
+      await redis.zadd({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, members: [[buffer.value, buffer.score]] })
     }
   } else if (type === 'hash') {
     // Hash 直接 HSET 更新或新增 field
-    await redis.hset({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, field: buffer.field || original.field, value: buffer.value })
+    await redis.hset({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, field: buffer.field || original.field, value: buffer.value })
     // 如果 field 名变了，需要删除旧的
     if (buffer.field && original.field && buffer.field !== original.field) {
-      await redis.hdel({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, fields: [original.field] })
+      await redis.hdel({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, fields: [original.field] })
     }
   }
 }
@@ -1829,13 +1833,13 @@ const removeElement = async (tableIndex: number) => {
     // 调用对应的 Redis 删除命令
     if (type === 'list') {
       // List 需要通过值来删除（可能有多处相同值）
-      await redis.lrem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, count: 1, value: original.value })
+      await redis.lrem({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, count: 1, value: original.value })
     } else if (type === 'set') {
-      await redis.srem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, values: [original.value] })
+      await redis.srem({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, values: [original.value] })
     } else if (type === 'zset') {
-      await redis.zrem({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, members: [original.value] })
+      await redis.zrem({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, members: [original.value] })
     } else if (type === 'hash') {
-      await redis.hdel({ host: conn.host, port: conn.port, password: conn.password, db: selectedDb.value ?? 0, key, fields: [original.field || ''] })
+      await redis.hdel({ host: conn.host, port: conn.port, username: conn.username, password: conn.password, db: selectedDb.value ?? 0, key, fields: [original.field || ''] })
     }
 
     // 刷新显示
@@ -1910,6 +1914,7 @@ const loadDatabases = async () => {
     const backendDatabases = await redis.getDatabases({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: selectedServer.value.db
     })
@@ -1976,6 +1981,7 @@ const loadKeys = async (reset: boolean = true) => {
     const keysResponse = await redis.getKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0,
       ...(reset ? { limit: pageSize } : {}) // 首次加载限制100个
@@ -2032,6 +2038,7 @@ const handleLoadMore = async () => {
     const keysResponse = await redis.getKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0
     })
@@ -2107,6 +2114,7 @@ const handleLoadAll = async () => {
     const keysResponse = await redis.getKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0
     })
@@ -2171,6 +2179,7 @@ const loadKeyValue = async (key: string) => {
     const result = await redis.getKeyValue({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0,
       key
@@ -2243,6 +2252,7 @@ const searchKeys = async () => {
     const result = await redis.searchKeys({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0,
       pattern: input || '*'
@@ -2337,6 +2347,7 @@ const addKey = async () => {
     await redis.setKeyValue({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0,
       key: newKeyForm.value.key,
@@ -2368,6 +2379,7 @@ const updateKey = async () => {
     await redis.setKeyValue({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0,
       key: editKeyForm.value.key,
@@ -2399,7 +2411,7 @@ const deleteKey = async () => {
     sessionManager.active.message = ''
     await trash.moveToTrash({
       host: selectedServer.value.host, port: selectedServer.value.port,
-      password: selectedServer.value.password, db: selectedDb.value ?? 0, key: selectedKey.value,
+      username: selectedServer.value.username, password: selectedServer.value.password, db: selectedDb.value ?? 0, key: selectedKey.value,
     })
     sessionManager.active.clearKeyDetail()
     await loadKeys()
@@ -2485,6 +2497,7 @@ const handleExport = async () => {
       await redis.exportData({
         host: selectedServer.value.host,
         port: selectedServer.value.port,
+        username: selectedServer.value.username,
         password: selectedServer.value.password,
         db: selectedDb.value ?? 0,
         file_path: filePath
@@ -2498,6 +2511,7 @@ const handleExport = async () => {
       const keysResponse = await redis.getKeys({
         host: selectedServer.value.host,
         port: selectedServer.value.port,
+        username: selectedServer.value.username,
         password: selectedServer.value.password,
         db: selectedDb.value ?? 0
       })
@@ -2508,6 +2522,7 @@ const handleExport = async () => {
           const result = await redis.getKeyValue({
             host: selectedServer.value.host,
             port: selectedServer.value.port,
+            username: selectedServer.value.username,
             password: selectedServer.value.password,
             db: selectedDb.value ?? 0,
             key
@@ -2572,6 +2587,7 @@ onMounted(async () => {
               await redis.importData({
                 host: selectedServer.value?.host || '',
                 port: selectedServer.value?.port || 6379,
+                username: selectedServer.value?.username,
                 password: selectedServer.value?.password,
                 db: selectedDb.value ?? 0,
                 file_path: '/tmp/redis-export.json'
@@ -2757,6 +2773,7 @@ const importData = async () => {
       await redis.importData({
         host: selectedServer.value.host,
         port: selectedServer.value.port,
+        username: selectedServer.value.username,
         password: selectedServer.value.password,
         db: selectedDb.value ?? 0,
         file_path: filePath
@@ -2847,6 +2864,7 @@ const addDb = async () => {
     await redis.createDatabase({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: newDbNumber.value
     })
@@ -2906,6 +2924,7 @@ const deleteDb = async () => {
       await redis.deleteDatabase({
         host: server.host,
         port: server.port,
+        username: server.username,
         password: server.password,
         db
       })
@@ -2997,6 +3016,7 @@ const batchMoveToTrash = async () => {
     const count = await trash.batchMoveToTrash({
       host: selectedServer.value.host,
       port: selectedServer.value.port,
+      username: selectedServer.value.username,
       password: selectedServer.value.password,
       db: selectedDb.value ?? 0,
       keys: selectedKeys.value

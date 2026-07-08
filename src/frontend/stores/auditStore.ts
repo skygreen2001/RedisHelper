@@ -56,6 +56,7 @@ export const useAuditStore = defineStore('audit', {
     currentServer: {
       host: '',
       port: 6379,
+      username: undefined as string | undefined,
       password: undefined as string | undefined,
     },
   }),
@@ -96,8 +97,8 @@ export const useAuditStore = defineStore('audit', {
 
   actions: {
     /** 设置当前服务器信息 */
-    setCurrentServer(host: string, port: number, password?: string) {
-      this.currentServer = { host, port, password }
+    setCurrentServer(host: string, port: number, password?: string, username?: string) {
+      this.currentServer = { host, port, username, password }
     },
 
     /** 设置筛选条件 */
@@ -115,6 +116,7 @@ export const useAuditStore = defineStore('audit', {
         const params: Record<string, any> = {
           host: this.currentServer.host,
           port: this.currentServer.port,
+          username: this.currentServer.username,
           password: this.currentServer.password,
           server_id: this.filters.serverId,
           server_name: this.filters.serverName,
@@ -153,6 +155,7 @@ export const useAuditStore = defineStore('audit', {
         const params = {
           host: this.currentServer.host,
           port: this.currentServer.port,
+          username: this.currentServer.username,
           password: this.currentServer.password,
           server_id: this.filters.serverId,
         }
@@ -188,6 +191,7 @@ export const useAuditStore = defineStore('audit', {
         await safeInvoke<boolean>('audit_clear', {
           host: this.currentServer.host,
           port: this.currentServer.port,
+          username: this.currentServer.username,
           password: this.currentServer.password,
         })
         this.logs = []
@@ -206,6 +210,7 @@ export const useAuditStore = defineStore('audit', {
         const result = await safeInvoke<number>('audit_generate_test_data', {
           host: this.currentServer.host,
           port: this.currentServer.port,
+          username: this.currentServer.username,
           password: this.currentServer.password,
           count,
         })

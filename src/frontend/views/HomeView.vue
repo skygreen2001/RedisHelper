@@ -305,6 +305,7 @@ const loadServerInfo = async () => {
     const serverInfoRaw = await redis.getServerInfo({
       host: props.server.host,
       port: props.server.port,
+      username: props.server.username,
       password: props.server.password,
       db: props.db || 0
     })
@@ -357,6 +358,7 @@ const loadKeyStatsInBackground = async () => {
     const keyStatsData = await redis.getKeyStats({
       host: props.server.host,
       port: props.server.port,
+      username: props.server.username,
       password: props.server.password,
       db: props.db || 0
     })
@@ -374,6 +376,7 @@ const refreshServerInfo = async () => {
     const serverInfoRaw = await redis.getServerInfo({
       host: props.server.host,
       port: props.server.port,
+      username: props.server.username,
       password: props.server.password,
       db: props.db || 0
     })

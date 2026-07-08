@@ -6,6 +6,8 @@ interface Server {
   name: string
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
   db: number
   readonly: boolean
@@ -16,6 +18,8 @@ interface Server {
 interface TestConnectionRequest {
   host: string
   port: number
+  /** ACL 用户名（Redis >= 6.0），可选 */
+  username?: string
   password?: string
 }
 
@@ -46,6 +50,7 @@ export const serverStore = defineStore('server', {
       name: string
       host: string
       port: number
+      username?: string
       password?: string
       db: number
       readonly?: boolean
@@ -66,6 +71,7 @@ export const serverStore = defineStore('server', {
       name: string
       host: string
       port: number
+      username?: string
       password?: string
       db: number
       readonly?: boolean
