@@ -26,7 +26,10 @@
 14. [ADR-013: 浏览器兼容模式（Web 平台支持）](#adr-013-浏览器兼容模式web-平台支持)
 15. [ADR-014: 多窗口多标签会话管理](#adr-014-多窗口多标签会话管理)
 16. [ADR-015: 操作审计日志](#adr-015-操作审计日志)
-17. [参考文档](#参考文档)
+17. [ADR-016: 元素级编辑功能](#adr-016-元素级编辑功能)
+18. [ADR-017: Redis ACL 用户名支持](#adr-017-redis-acl-用户名支持)
+19. [ADR-018: 操作审核配置开关](#adr-018-操作审核配置开关)
+20. [参考文档](#参考文档)
 
 ---
 
@@ -798,6 +801,193 @@ AuditEntry {
 - 所有键值读写操作会增加一次 LPUSH 写入，对性能影响极小（<1ms）
 - 日志保留策略为固定容量淘汰（LTRIM），不支持按时间自动过期
 - 审计功能可通过配置开关控制
+
+---
+
+## 16. ADR-016: 元素级编辑功能
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | ✅ 已完成 |
+| **决策日期** | 2026-06-21 |
+| **实现版本** | v1.3.0 |
+
+### 背景
+
+原有复杂数据类型（List/Set/ZSet/Hash）的编辑方式为 JSON 覆盖模式：在 textarea 中编辑整个 JSON，然后整体替换。这种方式在元素数量较多时不便操作，且容易因 JSON 格式错误导致数据丢失。用户需要对单个元素进行增删改的精细化操作。
+
+### 功能需求
+
+| 需求 | 优先级 | 说明 |
+|------|--------|------|
+| 元素级编辑 | 高 | 对单个元素进行增加、删除、修改 |
+| 模式切换 | 高 | 保留原有覆盖模式，新增元素编辑模式 |
+| 搜索过滤 | 中 | 在元素列表中搜索匹配的元素 |
+| ZSet 排序 | 中 | 按 Score 或 Member 排序 |
+
+### 设计决策
+
+#### 16.1 编辑模式
+
+| 方案 | 优点 | 缺点 | 决策 |
+|------|------|------|------|
+| 仅元素编辑 | 操作精细 | 无法批量编辑 | ❌ |
+| 仅覆盖编辑 | 实现简单 | 不适合大量元素 | ❌ |
+| **双模式切换** | 兼顾精细和批量 | 实现复杂 | ✅ |
+
+#### 16.2 技术实现
+
+- 使用 `el-radio-group` 实现覆盖模式 ↔ 元素编辑模式切换（仅复杂类型显示）
+- Table 支持 inline editing（点击编辑图标进入行内编辑模式）
+- 各类型的元素操作调用对应的 Redis 原生命令：
+
+| 类型 | 增 | 改 | 删 |
+|------|-----|-----|-----|
+| List | RPUSH | LSET | LREM |
+| Set | SADD | — | SREM |
+| ZSet | ZADD | — | ZREM |
+| Hash | HSET | HSET | HDEL |
+
+#### 16.3 新增元素交互
+
+| 方案 | 优点 | 缺点 | 决策 |
+|------|------|------|------|
+| 表格末尾内联行 | 操作直接 | 类型字段不统一 | ❌ |
+| **独立对话框** | 按类型定制字段 | 需要额外点击 | ✅ |
+
+对话框按类型显示不同字段：
+- List/Set：单个 Value 文本域
+- ZSet：Member + Score 数字输入
+- Hash：Field + Value（重复 Field 弹出覆盖确认）
+
+#### 16.4 ZSet 排序
+
+ZSet 表格拆分为 Member 列 + Score 列独立展示，工具栏新增排序下拉：默认顺序 / Score 升序 / Score 降序 / Member A-Z / Member Z-A。
+
+### 新增 Tauri 命令（9 个）
+
+| 命令 | 功能 |
+|------|------|
+| `list_rpush` | List 添加元素（RPUSH） |
+| `list_lset` | List 修改元素（LSET） |
+| `list_lrem` | List 删除元素（LREM） |
+| `set_sadd` | Set 添加成员（SADD） |
+| `set_srem` | Set 删除成员（SREM） |
+| `zset_zadd` | ZSet 添加成员（ZADD） |
+| `zset_zrem` | ZSet 删除成员（ZREM） |
+| `hash_hset` | Hash 设置字段（HSET） |
+| `hash_hdel` | Hash 删除字段（HDEL） |
+
+### 后果
+
+- 用户可以对复杂数据类型的单个元素进行精细化操作，无需重写整个 JSON
+- 新增 9 个 Tauri 命令，WebSocket 代理同步添加对应处理器
+- Set/ZSet 的「修改」操作通过先删后增实现（无原生修改命令）
+
+---
+
+## 17. ADR-017: Redis ACL 用户名支持
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | ✅ 已完成 |
+| **决策日期** | 2026-07-08 |
+| **实现版本** | v1.3.0 |
+
+### 背景
+
+Redis 6.0 引入了 ACL（Access Control List）功能，支持通过用户名和密码进行认证。原有工具仅支持密码认证（`AUTH password`），无法连接使用 ACL 的 Redis 服务器。
+
+### 功能需求
+
+| 需求 | 优先级 | 说明 |
+|------|--------|------|
+| 用户名认证 | 高 | 支持 `AUTH username password` 认证方式 |
+| 向后兼容 | 高 | 不影响原有仅密码认证的服务器配置 |
+| 全链路贯通 | 高 | 前后端所有 Request 结构体和连接逻辑均支持 |
+
+### 设计决策
+
+#### 17.1 认证方式
+
+Redis AUTH 命令分 4 种情况：
+
+| 组合 | URL 格式 |
+|------|---------|
+| (username, password) | `redis://user:pass@host:port` |
+| (username, 无密码) | `redis://user@host:port` |
+| (无username, password) | `redis://:pass@host:port` |
+| (无username, 无密码) | `redis://host:port` |
+
+#### 17.2 连接缓存
+
+连接缓存 key 从 4 段 `host:port:password:db` 扩展为 5 段 `host:port:username:password:db`（username 可为空字符串）。
+
+#### 17.3 API 设计
+
+新增 `RedisConnection::new_with_auth(host, port, username, password)` 方法，原有 `new()` 方法保留作为兼容包装。
+
+### 影响范围
+
+全链路修改，涉及所有 Request 结构体和连接逻辑：
+
+| 层级 | 修改文件 |
+|------|---------|
+| Rust 后端 | connection.rs, config.rs, trash.rs, redis.rs, server.rs, export.rs, trash.rs, audit.rs |
+| 前端 Store | serverStore.ts, redisStore.ts, trashStore.ts, logStore.ts, auditStore.ts |
+| 前端视图 | ServerConfigView.vue, MainView.vue, HomeView.vue, LogDialog.vue, MemoryDialog.vue |
+| 会话管理 | Session.ts |
+| 浏览器适配 | browser-adapter.ts |
+| WebSocket 代理 | ws-proxy.js |
+
+### 后果
+
+- 支持 Redis 6.0+ 的 ACL 认证，用户名字段为可选项
+- 所有 14+ 个 Request 结构体新增 `username: Option<String>` 字段
+- 缓存 key 格式变更，但不影响已有配置（username 默认为空）
+
+---
+
+## 18. ADR-018: 操作审核配置开关
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | ✅ 已完成 |
+| **决策日期** | 2026-07-09 |
+| **实现版本** | v1.3.0 |
+
+### 背景
+
+ADR-015 实现了操作审计日志功能，所有键值读写操作均会记录到 Redis。部分用户反馈审计日志会增加 Redis 写入开销，希望在不需要时关闭审计功能。
+
+### 功能需求
+
+| 需求 | 优先级 | 说明 |
+|------|--------|------|
+| 全局开关 | 高 | 在服务器设置页面控制审计日志的启用/禁用 |
+| 持久化 | 高 | 开关状态保存在配置文件中 |
+| 性能优化 | 中 | 关闭时跳过审计日志写入 |
+
+### 设计决策
+
+| 方案 | 优点 | 缺点 | 决策 |
+|------|------|------|------|
+| 每服务器独立开关 | 精细化控制 | UI 复杂 | ❌ |
+| **全局开关** | 简单直接 | 无法按服务器区分 | ✅ |
+
+### 实现方式
+
+1. `Config` 结构体新增 `audit_enabled: bool` 字段（默认 `true`）
+2. 新增 2 个 Tauri 命令：`get_audit_enabled`、`set_audit_enabled`
+3. `configStore.ts` 新增 `auditEnabled` 状态和 `loadAuditConfig`/`setAuditEnabled` actions
+4. `ServerConfigView.vue` 新增审计开关 UI
+5. `commands/redis.rs` 中 `get_key_value`、`set_key_value`、`delete_key` 在执行审计记录前检查 `is_audit_enabled()`
+
+### 后果
+
+- 用户可在服务器设置页面一键关闭/开启操作审计
+- 关闭后键值操作不再产生 LPUSH 写入，性能略有提升
+- 已记录的审计日志不受开关影响，仍可查询
 
 ---
 
