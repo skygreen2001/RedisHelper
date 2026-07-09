@@ -27,10 +27,16 @@ pub struct Config {
     pub servers: Vec<ServerConfig>,
     #[serde(default = "default_debug_log_enabled")]
     pub debug_log_enabled: bool,
+    #[serde(default = "default_audit_enabled")]
+    pub audit_enabled: bool,
 }
 
 fn default_debug_log_enabled() -> bool {
     false
+}
+
+fn default_audit_enabled() -> bool {
+    true
 }
 
 /// 全局配置管理器缓存
@@ -48,6 +54,12 @@ pub fn get_global_config_manager() -> &'static Mutex<ConfigManager> {
 pub fn is_debug_log_enabled() -> bool {
     let manager = get_global_config_manager().lock().unwrap();
     manager.get_debug_log_enabled()
+}
+
+/// 检查操作审核是否启用
+pub fn is_audit_enabled() -> bool {
+    let manager = get_global_config_manager().lock().unwrap();
+    manager.get_audit_enabled()
 }
 
 /// Debug 日志打印宏
@@ -100,9 +112,10 @@ impl ConfigManager {
             Ok(config)
         } else {
             // 返回默认配置
-            Ok(Config { 
+            Ok(Config {
                 servers: Vec::new(),
                 debug_log_enabled: false,
+                audit_enabled: true,
             })
         }
     }
@@ -170,5 +183,13 @@ impl ConfigManager {
     
     pub fn set_debug_log_enabled(&mut self, enabled: bool) {
         self.config.debug_log_enabled = enabled;
+    }
+
+    pub fn get_audit_enabled(&self) -> bool {
+        self.config.audit_enabled
+    }
+
+    pub fn set_audit_enabled(&mut self, enabled: bool) {
+        self.config.audit_enabled = enabled;
     }
 }

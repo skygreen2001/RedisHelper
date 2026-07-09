@@ -146,3 +146,17 @@ pub fn set_debug_log_enabled(enabled: bool) -> Result<bool, String> {
     manager.save().map_err(|e| e.to_string())?;
     Ok(enabled)
 }
+
+#[tauri::command]
+pub fn get_audit_enabled() -> Result<bool, String> {
+    let manager = get_global_config_manager().lock().unwrap();
+    Ok(manager.get_audit_enabled())
+}
+
+#[tauri::command]
+pub fn set_audit_enabled(enabled: bool) -> Result<bool, String> {
+    let mut manager = get_global_config_manager().lock().unwrap();
+    manager.set_audit_enabled(enabled);
+    manager.save().map_err(|e| e.to_string())?;
+    Ok(enabled)
+}

@@ -72,9 +72,14 @@ updateConsoleOutput()
 const AUDIT_LOG_KEY = 'redis:audit:logs'
 // 最大审计日志数量
 const MAX_AUDIT_LOGS = 1000000
+// 操作审核开关（默认开启）
+let AUDIT_ENABLED = true
 
 // 记录审计日志
 async function recordAuditLog(conn, host, port, db, command, args, success, errorMessage = null) {
+  // 操作审核关闭时不记录
+  if (!AUDIT_ENABLED) return
+
   const auditEntry = {
     id: crypto.randomUUID(),
     timestamp: Date.now(),
@@ -90,14 +95,74 @@ async function recordAuditLog(conn, host, port, db, command, args, success, erro
   }
   
   try {
+    // 审计日志统一写入 db0，避免分散到各 db 导致查询缺失
+    const needSwitch = db !== 0
+    if (needSwitch) {
+      await conn.select(0)
+    }
     // 使用 LPUSH 将日志添加到列表头部
     await conn.lpush(AUDIT_LOG_KEY, JSON.stringify(auditEntry))
     // 使用 LTRIM 保持列表长度
     await conn.ltrim(AUDIT_LOG_KEY, 0, MAX_AUDIT_LOGS - 1)
+    // 切回原 db，保证后续命令不受影响
+    if (needSwitch) {
+      await conn.select(db)
+    }
     console.log(`[ws-proxy][audit] 记录审计日志: ${command} ${args.join(' ')}`)
   } catch (err) {
     console.error(`[ws-proxy][audit] 记录审计日志失败:`, err.message)
+    // 确保切回原 db
+    if (db !== 0) {
+      try { await conn.select(db) } catch {}
+    }
   }
+}
+
+// 收集所有 db 中的审计日志（历史日志可能分散在各个 db）
+// 返回合并后按时间倒序排列的日志数组，并保证连接切回 origDb
+async function collectAuditLogsFromAllDbs(conn, origDb) {
+  // 确定需要检查的 db 列表（通过 INFO keyspace 获取有数据的 db）
+  const dbsToCheck = new Set([0])
+  try {
+    const info = await conn.info('keyspace')
+    if (typeof info === 'string') {
+      for (const line of info.split('\n')) {
+        const match = line.match(/^db(\d+):/)
+        if (match) dbsToCheck.add(parseInt(match[1]))
+      }
+    }
+  } catch (err) {
+    console.error(`[ws-proxy][audit] 获取 keyspace 失败:`, err.message)
+  }
+
+  const allLogs = []
+  for (const n of dbsToCheck) {
+    try {
+      if (n !== origDb) {
+        await conn.select(n)
+      }
+      // 仅当 key 存在时才读取
+      const exists = await conn.exists(AUDIT_LOG_KEY)
+      if (!exists) continue
+      const logs = await conn.lrange(AUDIT_LOG_KEY, 0, -1)
+      for (const log of logs) {
+        try {
+          allLogs.push(JSON.parse(log))
+        } catch {}
+      }
+    } catch (err) {
+      console.error(`[ws-proxy][audit] 读取 db${n} 审计日志失败:`, err.message)
+    }
+  }
+
+  // 切回原 db，保证后续命令不受影响
+  if (origDb !== 0 && origDb !== undefined) {
+    try { await conn.select(origDb) } catch {}
+  }
+
+  // 按时间倒序（最新在前）
+  allLogs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+  return allLogs
 }
 
 // 统一 Redis 命令执行（自动管理连接生命周期）
@@ -181,7 +246,8 @@ async function executeRedisCommand(host, port, username, password, db, commandFn
 // 命令处理器
 const handlers = {
   // 调试模式控制（由前端 Web 界面调用）
-  async set_debug_log_enabled({ enabled }) {
+  async set_debug_log_enabled({ req }) {
+    const enabled = req?.enabled ?? true
     DEBUG_MODE = enabled === true
     updateConsoleOutput()
     console.log(`[ws-proxy] 调试模式已${DEBUG_MODE ? '启用' : '关闭'}（由 Web 界面控制）`)
@@ -190,6 +256,18 @@ const handlers = {
 
   async get_debug_log_enabled() {
     return DEBUG_MODE
+  },
+
+  // 操作审核开关（由前端 Web 界面控制）
+  async set_audit_enabled({ req }) {
+    const enabled = req?.enabled ?? true
+    AUDIT_ENABLED = enabled === true
+    console.log(`[ws-proxy] 操作审核已${AUDIT_ENABLED ? '启用' : '关闭'}（由 Web 界面控制）`)
+    return AUDIT_ENABLED
+  },
+
+  async get_audit_enabled() {
+    return AUDIT_ENABLED
   },
 
   // 测试连接
@@ -439,40 +517,36 @@ const handlers = {
   async audit_get_logs({ host, port, username, password, db, server_id, start_time, end_time, command, limit, offset }) {
     return executeRedisCommand(host, port, username, password, db, async (conn) => {
       console.log(`[ws-proxy][audit] 获取审计日志: server_id=${server_id}, limit=${limit}, offset=${offset}`)
-      
-      // 获取审计日志列表
-      const logs = await conn.lrange(AUDIT_LOG_KEY, offset, offset + (limit || 50) - 1)
-      
-      // 解析日志
-      const parsedLogs = logs.map(log => {
-        try {
-          return JSON.parse(log)
-        } catch {
-          return null
-        }
-      }).filter(Boolean)
-      
+
+      // 汇总所有 db 中的审计日志（历史日志可能分散在各 db）
+      const allLogs = await collectAuditLogsFromAllDbs(conn, db)
+
       // 过滤日志
-      let filteredLogs = parsedLogs
-      
+      let filteredLogs = allLogs
+
       if (server_id) {
         filteredLogs = filteredLogs.filter(log => log.serverId === server_id)
       }
-      
+
       if (start_time) {
         filteredLogs = filteredLogs.filter(log => log.timestamp >= start_time)
       }
-      
+
       if (end_time) {
         filteredLogs = filteredLogs.filter(log => log.timestamp <= end_time)
       }
-      
+
       if (command) {
         filteredLogs = filteredLogs.filter(log => log.command === command.toUpperCase())
       }
-      
-      console.log(`[ws-proxy][audit] 返回 ${filteredLogs.length} 条审计日志`)
-      return filteredLogs
+
+      // 分页
+      const lim = limit || 50
+      const off = offset || 0
+      const pagedLogs = filteredLogs.slice(off, off + lim)
+
+      console.log(`[ws-proxy][audit] 汇总 ${allLogs.length} 条，过滤后 ${filteredLogs.length} 条，返回 ${pagedLogs.length} 条审计日志`)
+      return pagedLogs
     })
   },
 
@@ -480,35 +554,26 @@ const handlers = {
   async audit_get_stats({ host, port, username, password, db, server_id }) {
     return executeRedisCommand(host, port, username, password, db, async (conn) => {
       console.log(`[ws-proxy][audit] 获取审计统计: server_id=${server_id}`)
-      
-      // 获取所有审计日志
-      const logs = await conn.lrange(AUDIT_LOG_KEY, 0, -1)
-      
-      // 解析日志
-      const parsedLogs = logs.map(log => {
-        try {
-          return JSON.parse(log)
-        } catch {
-          return null
-        }
-      }).filter(Boolean)
-      
+
+      // 汇总所有 db 中的审计日志（历史日志可能分散在各 db）
+      const parsedLogs = await collectAuditLogsFromAllDbs(conn, db)
+
       // 过滤指定服务器
       let filteredLogs = parsedLogs
       if (server_id) {
         filteredLogs = filteredLogs.filter(log => log.serverId === server_id)
       }
-      
+
       // 按命令类型统计
       const commandStats = {}
       filteredLogs.forEach(log => {
         const cmd = log.command
         if (!commandStats[cmd]) {
-          commandStats[cmd] = { 
-            count: 0, 
-            totalCostMs: 0, 
-            successCount: 0, 
-            errorCount: 0 
+          commandStats[cmd] = {
+            count: 0,
+            totalCostMs: 0,
+            successCount: 0,
+            errorCount: 0
           }
         }
         commandStats[cmd].count++
@@ -519,7 +584,7 @@ const handlers = {
           commandStats[cmd].errorCount++
         }
       })
-      
+
       // 转换为前端期望的格式
       const result = Object.entries(commandStats).map(([cmd, stats]) => ({
         command: cmd,
@@ -540,11 +605,43 @@ const handlers = {
   async audit_clear({ host, port, username, password, db }) {
     return executeRedisCommand(host, port, username, password, db, async (conn) => {
       console.log(`[ws-proxy][audit] 清空审计日志`)
-      
-      // 删除审计日志列表
-      await conn.del(AUDIT_LOG_KEY)
-      
-      console.log(`[ws-proxy][audit] 审计日志已清空`)
+
+      // 遍历所有 db 删除审计日志 key（历史日志可能分散在各 db）
+      const dbsToCheck = new Set([0, db])
+      try {
+        const info = await conn.info('keyspace')
+        if (typeof info === 'string') {
+          for (const line of info.split('\n')) {
+            const match = line.match(/^db(\d+):/)
+            if (match) dbsToCheck.add(parseInt(match[1]))
+          }
+        }
+      } catch (err) {
+        console.error(`[ws-proxy][audit] 获取 keyspace 失败:`, err.message)
+      }
+
+      let deletedCount = 0
+      for (const n of dbsToCheck) {
+        try {
+          if (n !== db) {
+            await conn.select(n)
+          }
+          const exists = await conn.exists(AUDIT_LOG_KEY)
+          if (exists) {
+            await conn.del(AUDIT_LOG_KEY)
+            deletedCount++
+          }
+        } catch (err) {
+          console.error(`[ws-proxy][audit] 清空 db${n} 审计日志失败:`, err.message)
+        }
+      }
+
+      // 切回原 db
+      if (db !== 0 && db !== undefined) {
+        try { await conn.select(db) } catch {}
+      }
+
+      console.log(`[ws-proxy][audit] 审计日志已清空，共清理 ${deletedCount} 个 db`)
       return true
     })
   },

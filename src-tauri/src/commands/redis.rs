@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::redis::connection::{RedisConnection, SlowlogRaw, KeyMemoryItem, KeyTypeStat, MemoryInfo, KeyStatItem, KeysResponse};
 use crate::redis::audit::{AuditEntry, write_entry_to_list_sync};
-use crate::storage::config::debug_println;
+use crate::storage::config::{debug_println, is_audit_enabled};
 
 /// 记录审计日志的辅助函数
 #[allow(clippy::too_many_arguments)]
@@ -16,6 +16,11 @@ fn record_audit_log(
     success: bool,
     error_message: Option<String>,
 ) {
+    // 操作审核关闭时不记录审计日志
+    if !is_audit_enabled() {
+        return;
+    }
+
     debug_println!("[AUDIT RECORD] Called for command: {} args: {:?}", command, args);
     
     let redis_url = match password {

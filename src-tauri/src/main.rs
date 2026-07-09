@@ -306,6 +306,8 @@ fn main() {
             commands::server::test_connection,
             commands::server::get_debug_log_enabled,
             commands::server::set_debug_log_enabled,
+            commands::server::get_audit_enabled,
+            commands::server::set_audit_enabled,
             commands::redis::connect,
             commands::redis::get_databases,
             commands::redis::get_keys,

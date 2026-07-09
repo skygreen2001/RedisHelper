@@ -542,9 +542,11 @@ watch(visible, (isOpen) => {
         console.warn('[LogDialog] 打开时无 activeServerId，跳过自动加载')
       }
       
-      // 同时初始化审计存储
+      // 初始化审计存储并刷新数据
       if (props.host && props.port) {
         auditStore.setCurrentServer(props.host, props.port, props.password, props.username)
+        auditStore.fetchLogs()
+        auditStore.fetchStats()
       }
     })
   }

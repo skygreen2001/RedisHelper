@@ -105,6 +105,22 @@
       </div>
     </div>
 
+    <!-- 操作审核配置区域 -->
+    <div class="config-section">
+      <div class="config-item">
+        <div class="config-label">
+          <span class="config-title">操作审核</span>
+          <span class="config-description">开启后将记录 Redis 操作审计日志到 redis:audit:logs；关闭后不再记录，并删除已存在的审计 key</span>
+        </div>
+        <el-switch
+          v-model="auditEnabled"
+          @change="handleAuditSwitchChange"
+          active-text="开启"
+          inactive-text="关闭"
+        />
+      </div>
+    </div>
+
     <!-- 添加服务器对话框 -->
     <el-dialog
       v-model="showAddDialog"
@@ -225,7 +241,7 @@ import { Plus, Edit, Delete, Connection, Check, Close, Download, Upload } from '
 import { serverStore } from '../stores/serverStore'
 import { configStore } from '../stores/configStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { isTauriEnv } from '../utils/tauri'
+import { isTauriEnv, safeInvoke } from '../utils/tauri'
 import { sessionManager } from '../sessions/SessionManager'
 
 const server = serverStore()
@@ -237,6 +253,9 @@ const isDev = import.meta.env.DEV
 
 // 调试日志开关
 const debugEnabled = ref<boolean>(false)
+
+// 操作审核开关
+const auditEnabled = ref<boolean>(true)
 
 // 状态
 const showAddDialog = ref<boolean>(false)
@@ -546,6 +565,33 @@ const handleDebugSwitchChange = async (value: boolean) => {
   ElMessage.success(value ? '调试日志已开启' : '调试日志已关闭')
 }
 
+// 处理操作审核开关变化
+const handleAuditSwitchChange = async (value: boolean) => {
+  await config.setAuditEnabled(value)
+  if (!value) {
+    // 关闭时删除当前连接 redis 中的审计日志 key（如果有）
+    const activeServer = sessionManager.active.selectedServer
+    if (activeServer) {
+      try {
+        await safeInvoke('audit_clear', {
+          host: activeServer.host,
+          port: activeServer.port,
+          username: activeServer.username,
+          password: activeServer.password,
+        })
+        ElMessage.success('操作审核已关闭，已删除当前连接的审计日志')
+      } catch (error) {
+        console.error('删除审计日志失败:', error)
+        ElMessage.warning('操作审核已关闭，但删除当前连接的审计日志失败')
+      }
+    } else {
+      ElMessage.success('操作审核已关闭，不再记录审计日志')
+    }
+  } else {
+    ElMessage.success('操作审核已开启')
+  }
+}
+
 // 获取服务器索引
 const getServerIndex = (serverId: string): number => {
   return server.servers.findIndex(s => s.id === serverId)
@@ -595,6 +641,8 @@ onMounted(async () => {
   await server.loadServers()
   await config.loadDebugConfig()
   debugEnabled.value = config.debugLogEnabled
+  await config.loadAuditConfig()
+  auditEnabled.value = config.auditEnabled
 })
 </script>
 

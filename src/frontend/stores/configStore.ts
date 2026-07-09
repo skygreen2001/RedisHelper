@@ -14,6 +14,17 @@ function updateLocalStorage(enabled: boolean) {
   }
 }
 
+function updateAuditLocalStorage(enabled: boolean) {
+  try {
+    const config = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}')
+    config.auditEnabled = enabled
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
+    console.log('[configStore] 已更新 localStorage 中的操作审核配置:', enabled)
+  } catch (e) {
+    console.error('[configStore] 更新 localStorage 失败:', e)
+  }
+}
+
 function loadFromLocalStorage(): boolean {
   try {
     const config = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}')
@@ -24,9 +35,20 @@ function loadFromLocalStorage(): boolean {
   }
 }
 
+function loadAuditFromLocalStorage(): boolean {
+  try {
+    const config = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}')
+    return config.auditEnabled ?? true
+  } catch (e) {
+    console.error('[configStore] 从 localStorage 加载审核配置失败:', e)
+    return true
+  }
+}
+
 export const configStore = defineStore('config', {
   state: () => ({
-    debugLogEnabled: loadFromLocalStorage()
+    debugLogEnabled: loadFromLocalStorage(),
+    auditEnabled: loadAuditFromLocalStorage()
   }),
 
   actions: {
@@ -50,11 +72,11 @@ export const configStore = defineStore('config', {
       try {
         const isTauri = isTauriEnv()
         console.log(`[configStore] setDebugLogEnabled - isTauriEnv: ${isTauri}, enabled: ${enabled}`)
-        
+
         // 先立即更新 localStorage 和本地状态，确保响应快速
         this.debugLogEnabled = enabled
         updateLocalStorage(enabled)
-        
+
         const result = await safeInvoke<boolean>('set_debug_log_enabled', { enabled })
         console.log(`[configStore] setDebugLogEnabled result: ${result}`)
         if (result !== null) {
@@ -63,6 +85,38 @@ export const configStore = defineStore('config', {
         }
       } catch (error) {
         console.error('设置调试配置失败:', error)
+      }
+    },
+
+    async loadAuditConfig() {
+      try {
+        const enabled = await safeInvoke<boolean>('get_audit_enabled')
+        console.log(`[configStore] loadAuditConfig result: ${enabled}`)
+        if (enabled !== null) {
+          this.auditEnabled = enabled
+          updateAuditLocalStorage(enabled)
+        }
+      } catch (error) {
+        console.error('加载操作审核配置失败:', error)
+      }
+    },
+
+    async setAuditEnabled(enabled: boolean) {
+      try {
+        console.log(`[configStore] setAuditEnabled - enabled: ${enabled}`)
+
+        // 先立即更新 localStorage 和本地状态，确保响应快速
+        this.auditEnabled = enabled
+        updateAuditLocalStorage(enabled)
+
+        const result = await safeInvoke<boolean>('set_audit_enabled', { enabled })
+        console.log(`[configStore] setAuditEnabled result: ${result}`)
+        if (result !== null) {
+          this.auditEnabled = result
+          updateAuditLocalStorage(result)
+        }
+      } catch (error) {
+        console.error('设置操作审核配置失败:', error)
       }
     }
   }

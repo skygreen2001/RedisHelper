@@ -462,6 +462,8 @@ const PROXY_COMMANDS = new Set([
   'audit_clear',
   'set_debug_log_enabled',
   'get_debug_log_enabled',
+  'set_audit_enabled',
+  'get_audit_enabled',
   'list_rpush',
   'list_lset',
   'list_lrem',
