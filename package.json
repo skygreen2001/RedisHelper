@@ -27,7 +27,7 @@
     "redis": "^5.12.1",
     "sortablejs": "^1.15.7",
     "vue": "^3.4.0",
-    "ws": "^8.20.0"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@tauri-apps/api": "^2.0.0",
