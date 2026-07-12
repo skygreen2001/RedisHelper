@@ -2,6 +2,5 @@ node_modules/
 src-tauri/target/
 .history/
 dist/
-src-tauri/Cargo.lock
 src-tauri/gen/
 .workbuddy/
