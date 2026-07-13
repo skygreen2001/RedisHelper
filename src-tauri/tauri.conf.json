@@ -11,6 +11,7 @@
   },
   "bundle": {
     "active": true,
+    "useLocalToolsDir": true,
     "category": "DeveloperTool",
     "copyright": "",
     "externalBin": [],
@@ -25,11 +26,14 @@
     },
     "resources": [],
     "shortDescription": "Redis管理工具",
-    "targets": "all",
+    "targets": ["msi"],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
+      "timestampUrl": "",
+      "wix": {
+        "language": "zh-CN"
+      }
     }
   },
   "plugins": {

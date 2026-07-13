@@ -91,13 +91,7 @@ impl ConfigManager {
     }
     
     fn get_config_path() -> Result<String, Box<dyn std::error::Error>> {
-        let home_dir = std::env::var("HOME").map_err(|e| format!("Failed to get home directory: {}", e))?;
-        let config_dir = Path::new(&home_dir).join(".redis-helper");
-        
-        if !config_dir.exists() {
-            std::fs::create_dir_all(&config_dir).map_err(|e| format!("Failed to create config directory: {}", e))?;
-        }
-        
+        let config_dir = crate::storage::get_app_config_dir()?;
         let config_path = config_dir.join("config.json");
         Ok(config_path.to_str().unwrap().to_string())
     }
