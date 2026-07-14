@@ -37,7 +37,7 @@
     "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
     "typescript": "^5.2.2",
-    "vite": "^8.0.12",
+    "vite": "^8.1.4",
     "vue-tsc": "^2.2.12"
   },
   "optionalDependencies": {
